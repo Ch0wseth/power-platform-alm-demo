@@ -1,0 +1,162 @@
+name: Deploy Studio export (ZIP or YAML)
+
+on:
+  workflow_dispatch:
+    inputs:
+      export_run_id:
+        description: Successful Export Travel Concierge from Studio run on main
+        required: true
+        type: string
+      format:
+        description: ZIP updates the solution; YAML creates a separate demo agent
+        required: true
+        type: choice
+        options: [solution, template]
+      deploy:
+        description: Apply changes (false validates the artifact and connection only)
+        type: boolean
+        default: false
+        required: true
+
+concurrency:
+  group: release-radar-copilot-studio-test
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: copilot-studio-test
+    permissions:
+      actions: read
+      id-token: write
+    env:
+      PP_TENANT_ID: ${{ secrets.PP_TENANT_ID }}
+      PP_APPLICATION_ID: ${{ secrets.PP_APPLICATION_ID }}
+      PP_ENVIRONMENT_ID: ${{ secrets.PP_ENVIRONMENT_ID }}
+      PP_ENVIRONMENT_URL: ${{ secrets.PP_ENVIRONMENT_URL }}
+    steps:
+      - name: Check configuration and export provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPORT_RUN_ID: ${{ inputs.export_run_id }}
+        run: |
+          set -euo pipefail
+          for name in PP_TENANT_ID PP_APPLICATION_ID PP_ENVIRONMENT_ID PP_ENVIRONMENT_URL; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing environment secret $name"
+              exit 1
+            fi
+          done
+          if [[ ! "$PP_ENVIRONMENT_URL" =~ ^https://[a-zA-Z0-9.-]+\.crm[0-9]*\.dynamics\.com/?$ ]]; then
+            echo "::error::Expected a public-cloud Dataverse URL"
+            exit 1
+          fi
+          if [[ ! "$EXPORT_RUN_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::export_run_id must be a positive integer"
+            exit 1
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$EXPORT_RUN_ID" > run.json
+          jq -e --arg repo "$GITHUB_REPOSITORY" '
+            .status == "completed" and .conclusion == "success" and
+            .path == ".github/workflows/export-agent.yml" and
+            .head_branch == "main" and .head_repository.full_name == $repo and
+            .event == "workflow_dispatch"
+          ' run.json > /dev/null
+          echo "Export run: $EXPORT_RUN_ID" >> "$GITHUB_STEP_SUMMARY"
+          echo "Export workflow commit: $(jq -r .head_sha run.json)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Download trusted export
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: travel-studio-export
+          path: export
+          run-id: ${{ inputs.export_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Verify selected export
+        env:
+          FORMAT: ${{ inputs.format }}
+        run: |
+          set -euo pipefail
+          if [[ "$FORMAT" == "solution" ]]; then
+            python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          import zipfile
+
+          with zipfile.ZipFile("export/ppdemo_ReleaseRadar.zip") as archive:
+              if archive.testzip() is not None:
+                  raise SystemExit("Corrupt solution ZIP")
+              root = ET.fromstring(archive.read("solution.xml"))
+              if root.findtext("./SolutionManifest/UniqueName") != "ppdemo_ReleaseRadar":
+                  raise SystemExit("Unexpected solution identity")
+              if root.findtext("./SolutionManifest/Managed") != "0":
+                  raise SystemExit("Expected the unmanaged workshop solution")
+              if "bots/ppdemo_ReleaseRadar/bot.xml" not in archive.namelist():
+                  raise SystemExit("Travel Concierge is missing from the export")
+          PY
+            sha256sum export/ppdemo_ReleaseRadar.zip >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$FORMAT" == "template" ]]; then
+            test -s export/travel-concierge.yaml
+            sha256sum export/travel-concierge.yaml >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error::Unsupported deployment format"
+            exit 1
+          fi
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Authenticate using GitHub OIDC
+        id: authenticate
+        run: >-
+          dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes auth create
+          --name travel-export-deploy --githubFederated
+          --tenant "$PP_TENANT_ID"
+          --applicationId "$PP_APPLICATION_ID"
+          --environment "$PP_ENVIRONMENT_URL"
+
+      - name: Verify target environment
+        run: >-
+          dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes org who
+          --environment "$PP_ENVIRONMENT_ID"
+
+      - name: Import exported solution ZIP
+        if: inputs.deploy && inputs.format == 'solution'
+        run: >-
+          dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes solution import
+          --environment "$PP_ENVIRONMENT_ID"
+          --path export/ppdemo_ReleaseRadar.zip
+          --async --max-async-wait-time 30
+
+      - name: Create a separate agent from the YAML template
+        if: inputs.deploy && inputs.format == 'template'
+        run: >-
+          dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes copilot create
+          --environment "$PP_ENVIRONMENT_ID"
+          --schemaName ppdemo_TravelTemplateDemo
+          --displayName "Travel Concierge YAML"
+          --solution ppdemo_ReleaseRadar
+          --templateFileName export/travel-concierge.yaml
+
+      - name: Report outcome
+        env:
+          APPLY: ${{ inputs.deploy }}
+          FORMAT: ${{ inputs.format }}
+        run: |
+          set -euo pipefail
+          if [[ "$APPLY" == "true" ]]; then
+            echo "Applied $FORMAT export. Verify the agent in Studio and run a test conversation." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Artifact and connection checks only. No deployment performed." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "No explicit agent publish command or channel enablement. Import/create can trigger service-side provisioning; inspect publication state in Studio." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove runner authentication profile
+        if: always() && (steps.authenticate.outcome == 'success' || steps.authenticate.outcome == 'failure')
+        run: dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes auth clear

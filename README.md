@@ -17,7 +17,7 @@ This is an original, simplified demo of the [public Microsoft travel-concierge s
 - No reservation or request is saved. The agent cannot book, pay, refund or generate booking references.
 - Use synthetic examples only. Never enter credentials, card details, passport data, customer records or real booking IDs.
 - The repository is public. Keep tenant identifiers and environment-specific configuration out of committed files.
-- GitHub Actions packages the source into an **unmanaged Dataverse solution**. A separate, manually triggered workflow can import it into the configured test environment. Publishing the agent remains manual.
+- GitHub Actions can package local source or export the live agent as an **unmanaged Dataverse solution ZIP** and an **agent template YAML**. Deployment is manually triggered. No workflow explicitly publishes an agent, but import/create can trigger service-side provisioning and publication; inspect the resulting state in Studio.
 
 ## Try the demo
 
@@ -72,7 +72,7 @@ Use **Actions -> Deploy Travel Concierge -> Run workflow** on `main`:
 3. Run again with `import_solution` checked to import the same solution artifact.
 4. Open the imported agent in Copilot Studio and test it before manually publishing.
 
-Deployments are serialized, restricted to `main`, and use the GitHub Environment `copilot-studio-test`. The workflow only consumes successful packaging runs from this repository and records the source commit and ZIP SHA-256. It does not rebuild during deployment and never publishes the agent.
+Deployments are serialized, restricted to `main`, and use the GitHub Environment `copilot-studio-test`. The workflow only consumes successful packaging runs from this repository and records the source commit and ZIP SHA-256. It does not rebuild during deployment or invoke an explicit agent publish command.
 
 The GitHub Environment must contain these **environment secrets** (identifiers are kept out of public source and masked in logs):
 
@@ -93,7 +93,31 @@ Add the application's service principal as an application user in the target Dat
 2. Open the intended environment in Copilot Studio and use **Solutions → Import solution** to select the ZIP.
 3. Open the imported agent, test the conversation, review authentication and channel settings, and publish only after the environment owner approves.
 
-The solution package is environment-independent; select the target at import time. Import does **not** publish or share the agent. The environment URL and ID are intentionally not stored in this public repository.
+Select the target at import time. Environment-specific connections and dependencies might require configuration. Import can trigger service-side provisioning and publication even without an explicit publish command, as observed in this workshop. Review publication, authentication and channel state after import. The environment URL and ID are intentionally not stored in this public repository.
+
+## Two export-to-deployment demonstrations
+
+These paths start with the **live agent in Dataverse**, unlike `package-agent.yml`, which builds repository source.
+
+| Path | Export from Studio's environment | Deploy with GitHub Actions |
+| --- | --- | --- |
+| Classic solution | `pac solution export` produces the unmanaged solution ZIP | `pac solution import` imports the solution and its included components |
+| Agent template YAML | `pac copilot extract-template` produces one agent template | `pac copilot create --templateFileName ...` creates a separate agent |
+
+Run **Export Travel Concierge from Studio** (`export-agent.yml`) on `main`, selecting `both`. It exports solution `ppdemo_ReleaseRadar` and extracts that agent's template. The files are available in the `travel-studio-export` artifact for three days. Live exports can contain environment content: review before sharing or committing them. This public workshop repository must contain synthetic demo content only.
+
+Then run **Deploy Studio export (ZIP or YAML)** (`deploy-export.yml`):
+
+1. Enter the successful export run ID.
+2. Choose `solution` or `template`.
+3. Leave `deploy` unchecked for artifact/provenance and connection checks, or check it to perform the deployment.
+4. Open the resulting agent in Studio and test it. A green workflow means the PAC operation completed, not that the conversation passed.
+
+Both workflows currently use the existing `copilot-studio-test` GitHub Environment and OIDC identity. **This is a same-environment workshop round trip, not a configured dev-to-production promotion.** ZIP import updates the existing solution/agent; YAML creates **Travel Concierge YAML** with schema `ppdemo_TravelTemplateDemo` inside the existing `ppdemo_ReleaseRadar` solution. That solution must already exist in the target.
+
+Template creation is not an update operation: rerunning it after that schema exists should fail rather than delete or overwrite the agent. For repeated updates use the solution route or a separately configured clone/pull/push workspace. A template is not an entire Power Platform solution: do not assume external flows, connectors, connection references, environment variables or other dependencies are migrated. Validate those separately.
+
+All these workflows share the same concurrency group to prevent overlapping export/import operations. Neither new workflow calls `pac copilot publish` or enables channels, but service-side provisioning/publication can occur; inspect Studio before using a created/imported agent.
 
 ## Source layout
 
@@ -106,7 +130,9 @@ scripts/
   stabilize_solution_prefix.py
 .github/workflows/
   package-agent.yml       # Stable PAC CLI solution package; no deployment
-  deploy-agent.yml        # Manual OIDC import; no agent publication
+  deploy-agent.yml        # Manual OIDC import; no explicit publish command
+  export-agent.yml        # Export live solution ZIP and/or agent template YAML
+  deploy-export.yml       # Import ZIP or create another agent from template YAML
 ```
 
 ## References

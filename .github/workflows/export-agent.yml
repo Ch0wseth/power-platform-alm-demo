@@ -1,0 +1,104 @@
+name: Export Travel Concierge from Studio
+
+on:
+  workflow_dispatch:
+    inputs:
+      format:
+        description: Export a solution ZIP, an agent template YAML, or both
+        type: choice
+        options: [both, solution, template]
+        default: both
+        required: true
+
+concurrency:
+  group: release-radar-copilot-studio-test
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  export:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: copilot-studio-test
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      PP_TENANT_ID: ${{ secrets.PP_TENANT_ID }}
+      PP_APPLICATION_ID: ${{ secrets.PP_APPLICATION_ID }}
+      PP_ENVIRONMENT_ID: ${{ secrets.PP_ENVIRONMENT_ID }}
+      PP_ENVIRONMENT_URL: ${{ secrets.PP_ENVIRONMENT_URL }}
+    steps:
+      - name: Check configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in PP_TENANT_ID PP_APPLICATION_ID PP_ENVIRONMENT_ID PP_ENVIRONMENT_URL; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing environment secret $name"
+              exit 1
+            fi
+          done
+          if [[ ! "$PP_ENVIRONMENT_URL" =~ ^https://[a-zA-Z0-9.-]+\.crm[0-9]*\.dynamics\.com/?$ ]]; then
+            echo "::error::Expected a public-cloud Dataverse URL"
+            exit 1
+          fi
+          mkdir -p export
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Authenticate using GitHub OIDC
+        id: authenticate
+        run: >-
+          dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes auth create
+          --name travel-export --githubFederated
+          --tenant "$PP_TENANT_ID"
+          --applicationId "$PP_APPLICATION_ID"
+          --environment "$PP_ENVIRONMENT_URL"
+
+      - name: Verify source environment
+        run: >-
+          dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes org who
+          --environment "$PP_ENVIRONMENT_ID"
+
+      - name: Export unmanaged solution from Dataverse
+        if: inputs.format == 'both' || inputs.format == 'solution'
+        run: >-
+          dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes solution export
+          --environment "$PP_ENVIRONMENT_ID"
+          --name ppdemo_ReleaseRadar
+          --path export/ppdemo_ReleaseRadar.zip
+          --managed false --async --max-async-wait-time 30
+
+      - name: Extract agent template YAML from Dataverse
+        if: inputs.format == 'both' || inputs.format == 'template'
+        run: >-
+          dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes copilot extract-template
+          --environment "$PP_ENVIRONMENT_ID"
+          --bot ppdemo_ReleaseRadar
+          --templateFileName export/travel-concierge.yaml
+          --templateName TravelConcierge --templateVersion 1.0.0
+
+      - name: Record exported file hashes
+        run: |
+          set -euo pipefail
+          sha256sum export/* >> "$GITHUB_STEP_SUMMARY"
+          echo "Exported from the live environment, not rebuilt from repository YAML." >> "$GITHUB_STEP_SUMMARY"
+          echo "Treat this artifact as environment content; review before redistribution." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload export
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: travel-studio-export
+          path: export/*
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Remove runner authentication profile
+        if: always() && (steps.authenticate.outcome == 'success' || steps.authenticate.outcome == 'failure')
+        run: dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes auth clear

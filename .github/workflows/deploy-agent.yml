@@ -166,7 +166,7 @@ jobs:
           else
             echo "Identity and package checks passed. No solution was imported." >> "$GITHUB_STEP_SUMMARY"
           fi
-          echo "This workflow does not publish the agent or enable channels." >> "$GITHUB_STEP_SUMMARY"
+          echo "No explicit publish command or channel enablement. Import can trigger service-side provisioning/publication; inspect the resulting state in Studio." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove runner authentication profile
         if: always() && (steps.authenticate.outcome == 'success' || steps.authenticate.outcome == 'failure')
