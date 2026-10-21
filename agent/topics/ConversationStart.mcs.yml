@@ -10,6 +10,6 @@ beginDialog:
       id: sendMessage_M0LuhV
       activity:
         text:
-          - "Welcome to {System.Bot.Name}, your Power Platform release co-pilot. Try: “Start a readiness check”, “Walk me through a release”, or “Explain why the PR has no deployment credentials”. This demo is simulated; it is not connected to a live tenant."
+          - "Welcome to {System.Bot.Name}! Fancy a city break? Try 'Plan a city break' for a guided three-day trip to Lisbon, Rome, or Barcelona, or ask 'Can you book it?' to explore the demo's limits. Sample prices only: no live availability, reservations, or payments."
         speak:
-          - "Welcome to {System.Bot.Name}. Ask me to start a release readiness check or explain the release gates. This is a simulated demo."
+          - "Welcome to {System.Bot.Name}. Say plan a city break. All prices are fictional and no booking will be made."

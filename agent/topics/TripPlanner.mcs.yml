@@ -1,0 +1,180 @@
+mcs.metadata:
+  componentName: Plan a city break
+  description: Guide a fictional three-day trip for one adult through destination, budget, preferences, itinerary and a calculated estimate. All prices are synthetic; no booking occurs.
+kind: AdaptiveDialog
+beginDialog:
+  kind: OnRecognizedIntent
+  id: main
+  intent:
+    displayName: Plan a city break
+    triggerQueries:
+      - Plan a city break
+      - Plan a trip
+      - I want a holiday
+      - Help me plan a three-day weekend
+      - Organise un voyage
+      - Je veux partir en week-end
+      - Prepare un sejour
+  actions:
+    - kind: SendActivity
+      id: explainDemo
+      activity: "Let's build a fictional 3-day / 2-night trip for one adult in a single-occupancy room. Prices are sample EUR amounts, not live quotes. Flights, intercity travel, taxes, insurance and extras are excluded."
+    - kind: Question
+      id: chooseDestination
+      interruptionPolicy:
+        allowInterruption: true
+      variable: init:Topic.Destination
+      prompt: Where would you like to go?
+      entity:
+        kind: EmbeddedEntity
+        definition:
+          kind: ClosedListEntity
+          items:
+            - id: Lisbon
+              displayName: Lisbon
+            - id: Rome
+              displayName: Rome
+            - id: Barcelona
+              displayName: Barcelona
+    - kind: Question
+      id: askBudget
+      interruptionPolicy:
+        allowInterruption: true
+      variable: init:Topic.Budget
+      prompt: What is your total budget in EUR for the demo stay, excluding the costs listed above? Enter a number, for example 400.
+      entity: NumberPrebuiltEntity
+    - kind: ConditionGroup
+      id: validateBudget
+      conditions:
+        - id: invalidBudget
+          condition: =Topic.Budget <= 0
+          actions:
+            - kind: SendActivity
+              id: budgetError
+              activity: "The budget must be a positive amount in EUR. Say 'Plan a city break' to restart. No proposal has been created."
+            - kind: EndDialog
+              id: endInvalidBudget
+    - kind: Question
+      id: askPreferences
+      interruptionPolicy:
+        allowInterruption: true
+      variable: init:Topic.Preferences
+      prompt: What is your travel style - food, culture or a relaxed pace? Use fictional preferences only. The itinerary below is a fixed example, not a live personalized search.
+      entity: StringPrebuiltEntity
+    - kind: ConditionGroup
+      id: selectSample
+      conditions:
+        - id: lisbonSample
+          condition: =Topic.Destination = 'ppdemo_ReleaseRadar.topic.TripPlanner.main.chooseDestination'.Lisbon
+          actions:
+            - kind: SetVariable
+              id: lisbonRoom
+              variable: init:Topic.RoomRate
+              value: =90
+            - kind: SetVariable
+              id: lisbonMeals
+              variable: init:Topic.MealsRate
+              value: =35
+            - kind: SetVariable
+              id: lisbonTransport
+              variable: init:Topic.TransportRate
+              value: =12
+            - kind: SetVariable
+              id: lisbonActivities
+              variable: init:Topic.Activities
+              value: =45
+            - kind: SetVariable
+              id: lisbonItinerary
+              variable: init:Topic.Itinerary
+              value: "Day 1: old-town walking route and a sample local dinner. Day 2: riverside stroll and a fictional museum visit. Day 3: market browsing and a relaxed cafe stop. Opening hours, tickets and accessibility have not been checked."
+        - id: romeSample
+          condition: =Topic.Destination = 'ppdemo_ReleaseRadar.topic.TripPlanner.main.chooseDestination'.Rome
+          actions:
+            - kind: SetVariable
+              id: romeRoom
+              variable: Topic.RoomRate
+              value: =110
+            - kind: SetVariable
+              id: romeMeals
+              variable: Topic.MealsRate
+              value: =40
+            - kind: SetVariable
+              id: romeTransport
+              variable: Topic.TransportRate
+              value: =15
+            - kind: SetVariable
+              id: romeActivities
+              variable: Topic.Activities
+              value: =65
+            - kind: SetVariable
+              id: romeItinerary
+              variable: Topic.Itinerary
+              value: "Day 1: central squares walking route and a sample pasta dinner. Day 2: a fictional history visit and a park break. Day 3: market browsing and a cafe stop. Opening hours, tickets and accessibility have not been checked."
+        - id: barcelonaSample
+          condition: =Topic.Destination = 'ppdemo_ReleaseRadar.topic.TripPlanner.main.chooseDestination'.Barcelona
+          actions:
+            - kind: SetVariable
+              id: barcelonaRoom
+              variable: Topic.RoomRate
+              value: =120
+            - kind: SetVariable
+              id: barcelonaMeals
+              variable: Topic.MealsRate
+              value: =45
+            - kind: SetVariable
+              id: barcelonaTransport
+              variable: Topic.TransportRate
+              value: =15
+            - kind: SetVariable
+              id: barcelonaActivities
+              variable: Topic.Activities
+              value: =60
+            - kind: SetVariable
+              id: barcelonaItinerary
+              variable: Topic.Itinerary
+              value: "Day 1: old-quarter walking route and a sample tapas dinner. Day 2: a fictional architecture visit and a waterfront stroll. Day 3: market browsing and a relaxed cafe stop. Opening hours, tickets and accessibility have not been checked."
+      elseActions:
+        - kind: SendActivity
+          id: destinationError
+          activity: "The destination could not be matched to a demo option. Say 'Plan a city break' to restart with Lisbon, Rome or Barcelona."
+        - kind: EndDialog
+          id: endUnknownDestination
+    - kind: SetVariable
+      id: calculateEstimate
+      variable: init:Topic.Total
+      value: =2 * Topic.RoomRate + 3 * Topic.MealsRate + 3 * Topic.TransportRate + Topic.Activities
+    - kind: SendActivity
+      id: showProposal
+      activity: |-
+        **Your fictional city break - {Topic.Destination}**
+
+        One adult, 3 days / 2 nights. Preferences noted for this conversation: {Topic.Preferences}. This is a fixed sample itinerary, not a personalized search.
+
+        {Topic.Itinerary}
+
+        **Sample cost breakdown (EUR)**
+        - Room: 2 nights x {Topic.RoomRate}
+        - Meals: 3 days x {Topic.MealsRate}
+        - Local transport: 3 days x {Topic.TransportRate}
+        - Activities: {Topic.Activities}
+        - **Total: {Topic.Total} EUR**, against your budget of {Topic.Budget} EUR.
+
+        Fictional prices only. Flights, intercity travel, taxes, insurance and extras are NOT included. No availability was checked and no booking or request was saved.
+    - kind: ConditionGroup
+      id: compareBudget
+      conditions:
+        - id: withinBudget
+          condition: =Topic.Total <= Topic.Budget
+          actions:
+            - kind: SendActivity
+              id: showWithinBudget
+              activity: "WITHIN DEMO BUDGET - {Topic.Budget - Topic.Total} EUR remaining for the listed demo categories only. This does not establish affordability of the complete trip."
+      elseActions:
+        - kind: SendActivity
+          id: showOverBudget
+          activity: "OVER DEMO BUDGET - the sample exceeds your budget by {Topic.Total - Topic.Budget} EUR. Nothing has been booked. Try a different demo destination or budget; there is no verified cheaper offer."
+    - kind: SendActivity
+      id: nextStep
+      activity: "Want another comparison? Say 'Plan a city break'. To learn the boundaries, ask 'Can you book it?'."
+    - kind: EndDialog
+      id: endPlanner

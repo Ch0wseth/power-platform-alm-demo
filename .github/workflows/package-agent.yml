@@ -1,4 +1,4 @@
-name: Package Release Radar
+name: Package Travel Concierge
 
 on:
   workflow_dispatch:

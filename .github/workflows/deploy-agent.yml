@@ -1,10 +1,10 @@
-name: Deploy Release Radar
+name: Deploy Travel Concierge
 
 on:
   workflow_dispatch:
     inputs:
       package_run_id:
-        description: Successful Package Release Radar run ID from main
+        description: Successful Package Travel Concierge run ID from main
         required: true
         type: string
       import_solution:

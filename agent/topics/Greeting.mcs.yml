@@ -20,9 +20,9 @@ beginDialog:
       id: sendMessage_abmysR
       activity:
         text:
-          - "Welcome to Release Radar. Pick a mission: start a release readiness check, walk through the four gates, or explain a failed CI check. This demo uses no live systems or data."
+          - "Welcome to Travel Concierge! Let's try a three-day city break in Lisbon, Rome, or Barcelona: pick a destination, set a budget, and get a sample itinerary with a calculated cost. All prices are fictional; nothing can be booked. Say 'Plan a city break' to start."
         speak:
-          - Welcome to Release Radar. Ask me to start a release readiness check or walk through the release gates.
+          - Welcome to Travel Concierge. Say plan a city break to start a fictional travel proposal.
 
     - kind: CancelAllDialogs
       id: cancelAllDialogs_01At22

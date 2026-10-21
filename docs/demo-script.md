@@ -1,16 +1,32 @@
-# Release Radar demo script
+# Travel Concierge demo script
 
-Use the Copilot Studio test chat with synthetic data. This is a scripted conversation with the demo agent, not a live deployment.
+Open the imported **Travel Concierge** agent in Copilot Studio and start a fresh test conversation. This original sample uses fictional data and no external connections.
 
-1. **Open:** `Walk me through a release`. Expected: Capture → Review → Release → Prove, with GitHub Actions and Power Platform Pipelines described as delivery choices.
-2. **Start:** `Start a release readiness check`. Expected: the agent asks about the solution owner, then one readiness question at a time.
-3. **Show a gap:** say that there is no named owner and no recovery plan. Expected: the final status is not `READY TO TEST`; the agent identifies ownership/recovery as gaps.
-4. **Show a control:** `Why does the pull request workflow have no deployment identity?` Expected: untrusted PR code is kept separate from a trusted deployment identity.
-5. **Close:** `What evidence proves the same artifact reached test?` Expected: the agent asks for or explains the commit, solution version, artifact digest, test record, approval, and run record.
+## Three-minute walkthrough
 
-## Acceptance checks
+1. **Start:** `Plan a city break`. The agent explains the fixed scope: one adult, three days, two single-occupancy room nights. Choose Lisbon.
+2. **Budget:** enter `400`, then `food and a relaxed pace`. The agent shows a fixed Lisbon itinerary and a transparent cost breakdown.
+3. **Math:** room `2 x 90`, meals `3 x 35`, local transport `3 x 12`, activities `45`: **366 EUR**. Expected outcome: **WITHIN DEMO BUDGET**, **34 EUR** remaining for the included categories.
+4. **Change:** restart with `Plan a city break`, choose Rome, budget `400`, preference `culture`. Expected total: **450 EUR**, **OVER DEMO BUDGET** by **50 EUR**.
+5. **Boundary:** `Can you book it?` Expected: no booking, payment, refund, live availability check or request submission; no booking reference.
+6. **ALM reveal:** show `agent/topics/TripPlanner.mcs.yml`, the Power Fx estimate and the GitHub Actions import run. The business scenario is travel; ALM is the delivery mechanism.
 
-- Answers stay within the fictional ALM walkthrough and don't claim live tenant access.
-- Missing owner, tests, target configuration, approval, or recovery are surfaced as readiness gaps.
-- The agent never requests or echoes real credentials or sensitive data.
-- No deployment, publishing, or external action is performed by this sample.
+## Acceptance cases
+
+| Case | Input | Expected |
+| --- | --- | --- |
+| Under budget | Lisbon, 400 EUR | 366 EUR total, 34 remaining |
+| Exact boundary | Rome, 450 EUR | Within demo budget, 0 remaining |
+| Over budget | Barcelona, 400 EUR | 480 EUR total, 80 over |
+| Invalid budget | Any destination, 0 or -1 | Explicit positive-budget error, no proposal; restart instruction |
+| Unsupported city | Ask for Tokyo | Explain that only Lisbon, Rome and Barcelona are demo options |
+| Reservation | Ask to book or pay | No external action or fabricated reference |
+| Sensitive data | Offer passport/card details | Do not request or use them; redirect to fictional planning |
+| Scope disclosure | Any completed plan | Fictional amounts; flights, intercity travel, taxes, insurance and extras excluded |
+| Preferences | Any free-text preference | Echoed as conversational input; fixed itinerary is not claimed to be personalized |
+
+These are live-chat acceptance cases for the presenter, not claims that runtime conversation tests have already passed. Packaging and solution import do not substitute for a Copilot Studio test-chat check.
+
+## Technical identity
+
+The schema and solution remain `ppdemo_ReleaseRadar`, preserving the previously deployed agent's identity. The visible name is Travel Concierge. Importing updates the existing agent; it does not publish it to any channel.

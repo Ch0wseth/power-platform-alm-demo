@@ -1,16 +1,21 @@
-# Release Radar
+# Travel Concierge
 
-A small, importable Copilot Studio demo for a Power Platform ALM workshop. The agent turns a release into four gates:
+A small, importable Copilot Studio travel demo for a Power Platform ALM workshop. It demonstrates a customer-facing agent rather than explaining ALM inside the conversation.
 
-**Capture → Review → Release → Prove**
+**Choose a city -> Set a budget -> Explore a sample itinerary -> Compare costs**
 
-It guides a maker through a simulated readiness check, asks about owners, dependencies, tests, artifact identity, target configuration, approval, and recovery, then returns `BLOCKED`, `NEEDS OWNER`, or `READY TO TEST`.
+Plan a fictional three-day / two-night city break for one adult in Lisbon, Rome or Barcelona. A structured topic collects the destination, budget and preferences, displays a fixed example itinerary, calculates the sample cost using Power Fx, and reports whether the included categories fit the budget.
+
+This is an original, simplified demo of the [public Microsoft travel-concierge scenario](https://learn.microsoft.com/power-platform/architecture/solution-ideas/agent-travel-customer), not an official Zava asset or a copy of an internal demo.
 
 ## Safety and scope
 
-- This is a fictional demo agent with **no GitHub, Dataverse, or Sanofi connections**.
-- It does not run CI, inspect an environment, deploy a solution, or publish the agent.
-- Use synthetic examples only. Never add credentials, customer or patient data, or regulated records.
+- The agent has **no booking, payment, inventory, weather or customer-data connections**.
+- Prices are fictional EUR amounts. No availability, opening hours, tickets or accessibility have been checked.
+- The estimate covers two single-occupancy room nights, three days of meals and local transport, and one activities allowance. It excludes flights, intercity travel, taxes, insurance and extras.
+- Preferences are collected in the conversation, but the guided itinerary is a fixed example, not a personalized live search.
+- No reservation or request is saved. The agent cannot book, pay, refund or generate booking references.
+- Use synthetic examples only. Never enter credentials, card details, passport data, customer records or real booking IDs.
 - The repository is public. Keep tenant identifiers and environment-specific configuration out of committed files.
 - GitHub Actions packages the source into an **unmanaged Dataverse solution**. A separate, manually triggered workflow can import it into the configured test environment. Publishing the agent remains manual.
 
@@ -18,13 +23,13 @@ It guides a maker through a simulated readiness check, asks about owners, depend
 
 In the Copilot Studio test chat, try:
 
-1. `Walk me through a release`
-2. `Start a release readiness check`
-3. Answer the questions one at a time; intentionally leave out an owner or recovery plan and observe the status.
-4. `Why should a pull request workflow have no deployment credentials?`
-5. `When would you use Power Platform Pipelines instead of GitHub Actions?`
+1. `Plan a city break`
+2. Choose **Lisbon**, enter **400** EUR, then **food and a relaxed pace**.
+3. Expected sample estimate: **366 EUR**, **34 EUR** below budget for the included categories.
+4. Restart with **Rome** and **400** EUR: **450 EUR**, **50 EUR** over budget.
+5. `Can you book it?` Expected: a clear explanation that no reservation or payment is possible.
 
-The readiness check should never claim that it has inspected a real environment or pipeline.
+The guided topics use English prompts; the agent instructions request the user's language for generative responses. French trigger phrases are included, but this is not a fully localized French solution.
 
 ## Package locally
 
@@ -50,19 +55,19 @@ dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes solution pack `
   --packagetype Unmanaged
 ```
 
-The final importable ZIP is written to `out/` and ignored by Git. PAC CLI currently generates a different publisher option-value prefix on each `copilot pack`; the normalization step fixes this demo publisher at `11411` so repeated packages remain compatible with its first import. Keep the publisher name and prefixes unchanged after importing this solution into an environment.
+The final importable ZIP is written to `out/` and ignored by Git. PAC CLI currently generates a different publisher option-value prefix on each `copilot pack`; the normalization step fixes this demo publisher at `11411`. The historical `ppdemo_ReleaseRadar` schema, solution name, artifact name and deployment identity are deliberately retained so importing this revision updates the existing agent instead of creating a second one. Only the displayed name and scenario change.
 
 ## Package with GitHub Actions
 
-Run **Actions → Package Release Radar → Run workflow**. The job has read-only repository permissions, uses no environment credentials, and publishes the ZIP as the `release-radar-solution` workflow artifact for 14 days.
+Run **Actions -> Package Travel Concierge -> Run workflow**. The job has read-only repository permissions, uses no environment credentials, and publishes the ZIP as the `release-radar-solution` workflow artifact for 14 days.
 
 ## Import into the intended test environment
 
 ### GitHub Actions deployment
 
-Use **Actions -> Deploy Release Radar -> Run workflow** on `main`:
+Use **Actions -> Deploy Travel Concierge -> Run workflow** on `main`:
 
-1. Supply the run ID of a successful **Package Release Radar** build from `main`.
+1. Supply the run ID of a successful **Package Travel Concierge** build from `main`.
 2. Leave `import_solution` unchecked to validate the artifact, OIDC identity, and target access without importing.
 3. Run again with `import_solution` checked to import the same solution artifact.
 4. Open the imported agent in Copilot Studio and test it before manually publishing.
@@ -96,7 +101,7 @@ The solution package is environment-independent; select the target at import tim
 agent/
   agent.mcs.yml
   settings.mcs.yml
-  topics/                 # Standard Copilot Studio agent topics
+  topics/                 # Guided trip planner, booking boundaries, system topics
 scripts/
   stabilize_solution_prefix.py
 .github/workflows/

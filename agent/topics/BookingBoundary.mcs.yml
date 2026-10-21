@@ -1,0 +1,24 @@
+mcs.metadata:
+  componentName: Booking and demo limits
+  description: Explain that this travel demo cannot reserve, pay, check availability, access a real booking or handle personal travel documents.
+kind: AdaptiveDialog
+beginDialog:
+  kind: OnRecognizedIntent
+  id: main
+  intent:
+    displayName: Booking and demo limits
+    triggerQueries:
+      - Can you book it?
+      - Book this holiday
+      - Pay for my trip
+      - Check my reservation
+      - What is my booking reference?
+      - Reserve mon voyage
+      - Peux-tu reserver ?
+      - I want a refund
+  actions:
+    - kind: SendActivity
+      id: explainBookingBoundary
+      activity: "This is a planning demo only: I cannot book, pay, refund, check live availability, access an existing reservation or send a request. No booking reference exists. Please do not share card numbers, passport details or real booking IDs. All prices are synthetic and exclude flights, intercity travel, taxes, insurance and extras. Say 'Plan a city break' to try a non-binding example."
+    - kind: EndDialog
+      id: endBoundary
