@@ -34,11 +34,23 @@ Requires .NET 10 or later and network access to NuGet:
 dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes copilot pack `
   --publisher-prefix ppdemo `
   --project-dir agent `
-  --output-path out `
+  --output-path out/raw `
   --solution-name ppdemo_ReleaseRadar
+
+dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes solution unpack `
+  --zipfile out/raw/ppdemo_ReleaseRadar.zip `
+  --folder out/unpacked `
+  --packagetype Unmanaged
+
+python scripts/stabilize_solution_prefix.py out/unpacked/Other/Solution.xml
+
+dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes solution pack `
+  --zipfile out/ppdemo_ReleaseRadar.zip `
+  --folder out/unpacked `
+  --packagetype Unmanaged
 ```
 
-The generated ZIP is written under `out/` and is ignored by Git.
+The final importable ZIP is written to `out/` and ignored by Git. PAC CLI currently generates a different publisher option-value prefix on each `copilot pack`; the normalization step fixes this demo publisher at `11411` so repeated packages remain compatible with its first import. Keep the publisher name and prefixes unchanged after importing this solution into an environment.
 
 ## Package with GitHub Actions
 
@@ -59,8 +71,10 @@ agent/
   agent.mcs.yml
   settings.mcs.yml
   topics/                 # Standard Copilot Studio agent topics
+scripts/
+  stabilize_solution_prefix.py
 .github/workflows/
-  package-agent.yml       # PAC CLI solution package; no deployment
+  package-agent.yml       # Stable PAC CLI solution package; no deployment
 ```
 
 ## References
