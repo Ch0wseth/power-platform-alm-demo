@@ -1,0 +1,15 @@
+mcs.metadata:
+  componentName: Conversation Start
+  description: This system topic triggers when the agent receives an Activity indicating the beginning of a new conversation. If you do not want the agent to initiate the conversation, disable this topic.
+kind: AdaptiveDialog
+beginDialog:
+  kind: OnConversationStart
+  id: main
+  actions:
+    - kind: SendActivity
+      id: sendMessage_M0LuhV
+      activity:
+        text:
+          - "Welcome to {System.Bot.Name}, your Power Platform release co-pilot. Try: “Start a readiness check”, “Walk me through a release”, or “Explain why the PR has no deployment credentials”. This demo is simulated; it is not connected to a live tenant."
+        speak:
+          - "Welcome to {System.Bot.Name}. Ask me to start a release readiness check or explain the release gates. This is a simulated demo."

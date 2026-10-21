@@ -1,0 +1,28 @@
+mcs.metadata:
+  componentName: Greeting
+  description: This topic is triggered when the user greets the agent.
+kind: AdaptiveDialog
+beginDialog:
+  kind: OnRecognizedIntent
+  id: main
+  intent:
+    displayName: Greeting
+    includeInOnSelectIntent: false
+    triggerQueries:
+      - Good afternoon
+      - Good morning
+      - Hello
+      - Hey
+      - Hi
+
+  actions:
+    - kind: SendActivity
+      id: sendMessage_abmysR
+      activity:
+        text:
+          - "Welcome to Release Radar. Pick a mission: start a release readiness check, walk through the four gates, or explain a failed CI check. This demo uses no live systems or data."
+        speak:
+          - Welcome to Release Radar. Ask me to start a release readiness check or walk through the release gates.
+
+    - kind: CancelAllDialogs
+      id: cancelAllDialogs_01At22

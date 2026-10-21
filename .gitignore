@@ -1,0 +1,6 @@
+out/
+*.zip
+.env
+.env.*
+!.env.example
+deployment/target-environment.json
