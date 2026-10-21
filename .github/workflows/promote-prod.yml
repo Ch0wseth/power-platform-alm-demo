@@ -1,0 +1,208 @@
+name: Promote validated Studio export to production
+
+on:
+  workflow_dispatch:
+    inputs:
+      export_run_id:
+        description: Successful Studio export run whose artifact was deployed in test
+        type: string
+        required: true
+      test_run_id:
+        description: Successful Deploy Studio export run for this format and export
+        type: string
+        required: true
+      format:
+        description: ZIP updates; YAML creates a new agent and requires the solution
+        type: choice
+        options: [solution, template]
+        required: true
+      test_validated:
+        description: I tested this exact export in the test environment and approve promotion
+        type: boolean
+        default: false
+        required: true
+
+permissions: {}
+
+jobs:
+  validate:
+    name: Verify test evidence and freeze promotion artifact
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Check out validation script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify matching export and successful test deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPORT_RUN_ID: ${{ inputs.export_run_id }}
+          TEST_RUN_ID: ${{ inputs.test_run_id }}
+          FORMAT: ${{ inputs.format }}
+          TEST_VALIDATED: ${{ inputs.test_validated }}
+        run: python3 scripts/verify_promotion.py
+
+      - name: Download the artifact used in test
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: travel-studio-export
+          path: promotion
+          run-id: ${{ inputs.export_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Freeze payload hashes and test evidence
+        env:
+          EXPORT_RUN_ID: ${{ inputs.export_run_id }}
+          TEST_RUN_ID: ${{ inputs.test_run_id }}
+          FORMAT: ${{ inputs.format }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          filename = {
+              "solution": "ppdemo_ReleaseRadar.zip",
+              "template": "travel-concierge.yaml",
+          }[os.environ["FORMAT"]]
+          payload = Path("promotion") / filename
+          if not payload.is_file() or not payload.stat().st_size:
+              raise SystemExit("Selected payload is missing or empty")
+          evidence = {
+              "format": os.environ["FORMAT"],
+              "export_run_id": os.environ["EXPORT_RUN_ID"],
+              "test_run_id": os.environ["TEST_RUN_ID"],
+              "filename": filename,
+              "sha256": hashlib.sha256(payload.read_bytes()).hexdigest(),
+          }
+          Path("promotion/validation.json").write_text(json.dumps(evidence, indent=2))
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write("## Ready for production approval\n\n")
+              summary.write("```json\n" + json.dumps(evidence, indent=2) + "\n```\n")
+              summary.write("Functional testing is attested by the dispatcher, not automated by this workflow.\n")
+          PY
+
+      - name: Store the exact production payload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: validated-promotion
+          path: promotion/*
+          if-no-files-found: error
+          retention-days: 3
+
+  production:
+    name: Deploy approved payload to production
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    concurrency:
+      group: copilot-studio-production
+      cancel-in-progress: false
+    environment: copilot-studio-prod
+    permissions:
+      actions: read
+      id-token: write
+    env:
+      PP_TENANT_ID: ${{ secrets.PP_TENANT_ID }}
+      PP_APPLICATION_ID: ${{ secrets.PP_APPLICATION_ID }}
+      PP_ENVIRONMENT_ID: ${{ secrets.PP_ENVIRONMENT_ID }}
+      PP_ENVIRONMENT_URL: ${{ secrets.PP_ENVIRONMENT_URL }}
+    steps:
+      - name: Download approved payload
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: validated-promotion
+          path: promotion
+
+      - name: Verify payload and production configuration
+        env:
+          FORMAT: ${{ inputs.format }}
+          EXPORT_RUN_ID: ${{ inputs.export_run_id }}
+          TEST_RUN_ID: ${{ inputs.test_run_id }}
+        run: |
+          set -euo pipefail
+          for name in PP_TENANT_ID PP_APPLICATION_ID PP_ENVIRONMENT_ID PP_ENVIRONMENT_URL; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing production secret $name"
+              exit 1
+            fi
+          done
+          if [[ ! "$PP_ENVIRONMENT_URL" =~ ^https://[a-zA-Z0-9.-]+\.crm[0-9]*\.dynamics\.com/?$ ]]; then
+            echo "::error::Expected a public-cloud Dataverse URL"
+            exit 1
+          fi
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          evidence = json.loads(Path("promotion/validation.json").read_text())
+          expected_filename = {
+              "solution": "ppdemo_ReleaseRadar.zip",
+              "template": "travel-concierge.yaml",
+          }[os.environ["FORMAT"]]
+          for key in ("format", "export_run_id", "test_run_id"):
+              if evidence[key] != os.environ[key.upper()]:
+                  raise SystemExit(f"Evidence mismatch: {key}")
+          if evidence["filename"] != expected_filename:
+              raise SystemExit("Unexpected payload filename")
+          digest = hashlib.sha256((Path("promotion") / expected_filename).read_bytes()).hexdigest()
+          if digest != evidence["sha256"]:
+              raise SystemExit("Production payload differs from validated payload")
+          PY
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Authenticate with production-only GitHub OIDC identity
+        id: authenticate
+        run: >-
+          dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes auth create
+          --name travel-prod --githubFederated
+          --tenant "$PP_TENANT_ID"
+          --applicationId "$PP_APPLICATION_ID"
+          --environment "$PP_ENVIRONMENT_URL"
+
+      - name: Verify production connection
+        run: >-
+          dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes org who
+          --environment "$PP_ENVIRONMENT_ID"
+
+      - name: Promote solution ZIP
+        if: inputs.format == 'solution'
+        run: >-
+          dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes solution import
+          --environment "$PP_ENVIRONMENT_ID"
+          --path promotion/ppdemo_ReleaseRadar.zip
+          --async --max-async-wait-time 30
+
+      - name: Create production agent from validated YAML template
+        if: inputs.format == 'template'
+        run: >-
+          dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes copilot create
+          --environment "$PP_ENVIRONMENT_ID"
+          --schemaName ppdemo_TravelTemplateDemo
+          --displayName "Travel Concierge YAML"
+          --solution ppdemo_ReleaseRadar
+          --templateFileName promotion/travel-concierge.yaml
+
+      - name: Report production deployment
+        run: |
+          cat promotion/validation.json >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Production PAC operation completed. Verify the agent in the production Studio environment." >> "$GITHUB_STEP_SUMMARY"
+          echo "No explicit publish command or channel enablement; inspect service-side publication state." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove runner authentication profile
+        if: always() && (steps.authenticate.outcome == 'success' || steps.authenticate.outcome == 'failure')
+        run: dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes auth clear

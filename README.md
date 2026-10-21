@@ -123,6 +123,47 @@ All these workflows share the same concurrency group to prevent overlapping expo
 
 ## Source layout
 
+### Promote a tested export to production
+
+Run **Promote validated Studio export to production** (`promote-prod.yml`) on
+`main` only after testing the selected artifact in the test environment:
+
+1. Enter the export run ID and the successful `deploy-export.yml` test run ID.
+2. Select the same format that deployed successfully in that test run.
+3. Check `test_validated` to attest that functional testing passed.
+4. The validation job checks workflow provenance, the successful format-specific
+   PAC step and the test run's artifact-download reference. It then freezes the
+   exported files and their SHA-256 in a promotion artifact; nothing is rebuilt.
+5. Approve the **copilot-studio-prod** deployment in GitHub's **Review deployments**
+   dialog. Only then does the production job receive its OIDC credentials and
+   deploy the payload whose hash was verified.
+
+Manual dispatch and a required GitHub Environment review are two separate gates.
+Functional testing is a human attestation, not an automated conversation test.
+The evidence check currently reads the pinned download action's `run-id` log line;
+if logs are expired or that format changes, it fails closed. Rerun test deployment
+to supply new evidence instead of skipping validation.
+
+Configure `copilot-studio-prod` with the same four `PP_*` secret names as test,
+but production-specific values and a separate Entra deployment application.
+Its federated credential must trust only this repository's production environment
+subject. Add a Dataverse application user in production with **System Customizer**.
+Restrict deployment branches to `main`, require reviewer **Ch0wseth** and disable
+administrator bypass. Self-review must remain allowed for this single-user workshop;
+in a team, prevent self-review and require an independent reviewer. These GitHub
+settings and secret values live outside Git; review them in repository settings.
+
+ZIP promotion uses the exact **unmanaged** workshop ZIP that passed test, supporting
+repeat imports. This is not a managed-solution production ALM design. For real
+production, build a managed release and test that same managed artifact before
+promotion, with connection/environment-variable settings and rollback planning.
+YAML promotion creates `ppdemo_TravelTemplateDemo` once; the containing
+`ppdemo_ReleaseRadar` solution must exist (promote ZIP first for this demo). A second
+YAML creation with that schema is expected to fail, not overwrite production.
+The template's documented loss of GPT metadata still applies in production.
+No workflow explicitly publishes agents or enables channels; service-side
+provisioning can change publication state, which must be reviewed in Studio.
+
 ```text
 agent/
   agent.mcs.yml
@@ -135,6 +176,7 @@ scripts/
   deploy-agent.yml        # Manual OIDC import; no explicit publish command
   export-agent.yml        # Export live solution ZIP and/or agent template YAML
   deploy-export.yml       # Import ZIP or create another agent from template YAML
+  promote-prod.yml        # Manual dispatch + test evidence + production approval
 ```
 
 ## References
