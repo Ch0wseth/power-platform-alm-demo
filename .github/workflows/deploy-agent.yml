@@ -71,12 +71,16 @@ jobs:
       - name: Check deployment configuration
         run: |
           set -euo pipefail
+          missing=false
           for name in PP_TENANT_ID PP_APPLICATION_ID PP_ENVIRONMENT_ID PP_ENVIRONMENT_URL; do
             if [[ -z "${!name}" ]]; then
               echo "::error::Missing environment secret $name in copilot-studio-test"
-              exit 1
+              missing=true
             fi
           done
+          if [[ "$missing" == "true" ]]; then
+            exit 1
+          fi
           if [[ ! "$PP_ENVIRONMENT_URL" =~ ^https://[a-zA-Z0-9.-]+\.crm[0-9]*\.dynamics\.com/?$ ]]; then
             echo "::error::PP_ENVIRONMENT_URL must be a public-cloud Dataverse URL, not the Copilot Studio portal URL"
             exit 1
@@ -126,6 +130,7 @@ jobs:
           sha256sum package/ppdemo_ReleaseRadar.zip >> "$GITHUB_STEP_SUMMARY"
 
       - name: Authenticate using GitHub OIDC
+        id: authenticate
         run: >-
           dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes auth create
           --name release-radar-deploy
@@ -164,5 +169,5 @@ jobs:
           echo "This workflow does not publish the agent or enable channels." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove runner authentication profile
-        if: always()
+        if: always() && (steps.authenticate.outcome == 'success' || steps.authenticate.outcome == 'failure')
         run: dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes auth clear
