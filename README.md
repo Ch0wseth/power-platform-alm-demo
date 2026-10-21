@@ -117,6 +117,8 @@ Both workflows currently use the existing `copilot-studio-test` GitHub Environme
 
 Template creation is not an update operation: rerunning it after that schema exists should fail rather than delete or overwrite the agent. For repeated updates use the solution route or a separately configured clone/pull/push workspace. A template is not an entire Power Platform solution: do not assume external flows, connectors, connection references, environment variables or other dependencies are migrated. Validate those separately.
 
+**Observed template limitation with PAC 2.13.1:** the live ZIP round trip retained all 16 agent components, including `GptComponentMetadata` with the authored instructions. The extracted YAML/create round trip produced 15 components and did **not** retain that GPT metadata component. The guided trip-planning topics worked in the template-created agent, but this is not a lossless generative-agent migration. Use the solution route when preserving that configuration is required; do not assume instructions or model settings survived template creation.
+
 All these workflows share the same concurrency group to prevent overlapping export/import operations. Neither new workflow calls `pac copilot publish` or enables channels, but service-side provisioning/publication can occur; inspect Studio before using a created/imported agent.
 
 ## Source layout
