@@ -1,0 +1,168 @@
+name: Deploy Release Radar
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_run_id:
+        description: Successful Package Release Radar run ID from main
+        required: true
+        type: string
+      import_solution:
+        description: Import solution (false checks identity and artifact only)
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: release-radar-copilot-studio-test
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  validate:
+    name: Validate trusted package run
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - name: Verify package provenance
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_RUN_ID: ${{ inputs.package_run_id }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$PACKAGE_RUN_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::package_run_id must be a positive integer"
+            exit 1
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PACKAGE_RUN_ID" > run.json
+          jq -e --arg repo "$GITHUB_REPOSITORY" '
+            .status == "completed" and
+            .conclusion == "success" and
+            .path == ".github/workflows/package-agent.yml" and
+            .head_branch == "main" and
+            .head_repository.full_name == $repo and
+            (.event == "push" or .event == "workflow_dispatch")
+          ' run.json > /dev/null
+          echo "sha=$(jq -r .head_sha run.json)" >> "$GITHUB_OUTPUT"
+          echo "Package run: $PACKAGE_RUN_ID" >> "$GITHUB_STEP_SUMMARY"
+          echo "Source commit: $(jq -r .head_sha run.json)" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Import into Copilot Studio test environment
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: copilot-studio-test
+    permissions:
+      actions: read
+      id-token: write
+    env:
+      PP_TENANT_ID: ${{ secrets.PP_TENANT_ID }}
+      PP_APPLICATION_ID: ${{ secrets.PP_APPLICATION_ID }}
+      PP_ENVIRONMENT_ID: ${{ secrets.PP_ENVIRONMENT_ID }}
+      PP_ENVIRONMENT_URL: ${{ secrets.PP_ENVIRONMENT_URL }}
+    steps:
+      - name: Check deployment configuration
+        run: |
+          set -euo pipefail
+          for name in PP_TENANT_ID PP_APPLICATION_ID PP_ENVIRONMENT_ID PP_ENVIRONMENT_URL; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing environment secret $name in copilot-studio-test"
+              exit 1
+            fi
+          done
+          if [[ ! "$PP_ENVIRONMENT_URL" =~ ^https://[a-zA-Z0-9.-]+\.crm[0-9]*\.dynamics\.com/?$ ]]; then
+            echo "::error::PP_ENVIRONMENT_URL must be a public-cloud Dataverse URL, not the Copilot Studio portal URL"
+            exit 1
+          fi
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Download validated package
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-radar-solution
+          path: package
+          run-id: ${{ inputs.package_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Verify solution identity and record artifact hash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          import zipfile
+          from pathlib import Path
+
+          packages = list(Path("package").glob("*.zip"))
+          if [p.name for p in packages] != ["ppdemo_ReleaseRadar.zip"]:
+              raise SystemExit("Expected exactly one Release Radar solution ZIP")
+          with zipfile.ZipFile(packages[0]) as archive:
+              if archive.testzip() is not None:
+                  raise SystemExit("Solution ZIP integrity check failed")
+              manifest = ET.fromstring(archive.read("solution.xml"))
+              checks = {
+                  "./SolutionManifest/UniqueName": "ppdemo_ReleaseRadar",
+                  "./SolutionManifest/Managed": "0",
+                  "./SolutionManifest/Publisher/UniqueName": "ppdemo",
+                  "./SolutionManifest/Publisher/CustomizationPrefix": "ppdemo",
+                  "./SolutionManifest/Publisher/CustomizationOptionValuePrefix": "11411",
+              }
+              for path, expected in checks.items():
+                  if manifest.findtext(path) != expected:
+                      raise SystemExit(f"Unexpected solution metadata: {path}")
+              if "bots/ppdemo_ReleaseRadar/bot.xml" not in archive.namelist():
+                  raise SystemExit("Release Radar agent is missing from solution")
+          PY
+          sha256sum package/ppdemo_ReleaseRadar.zip >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Authenticate using GitHub OIDC
+        run: >-
+          dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes auth create
+          --name release-radar-deploy
+          --githubFederated
+          --tenant "$PP_TENANT_ID"
+          --applicationId "$PP_APPLICATION_ID"
+          --environment "$PP_ENVIRONMENT_URL"
+
+      - name: Verify target environment identity
+        run: |
+          set -euo pipefail
+          dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes org who \
+            --environment "$PP_ENVIRONMENT_ID"
+
+      - name: Import unmanaged solution and wait for completion
+        if: inputs.import_solution
+        run: >-
+          dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes solution import
+          --path package/ppdemo_ReleaseRadar.zip
+          --environment "$PP_ENVIRONMENT_ID"
+          --async
+          --max-async-wait-time 30
+
+      - name: Report deployment outcome
+        env:
+          IMPORT_SOLUTION: ${{ inputs.import_solution }}
+          SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          echo "Source commit: $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$IMPORT_SOLUTION" == "true" ]]; then
+            echo "Solution import completed. Test the agent in Copilot Studio before publishing." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Identity and package checks passed. No solution was imported." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "This workflow does not publish the agent or enable channels." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove runner authentication profile
+        if: always()
+        run: dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes auth clear
