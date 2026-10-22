@@ -12,15 +12,17 @@ This is an original, simplified demo of the [public Microsoft travel-concierge s
 
 The [GitHub Copilot Harness workshop](docs/github-harness-alm.md) adds a second,
 independent scenario: create **ALM Release Advisor** in the GitHub Copilot Harness
-experience in Studio, then export its **managed** solution from DEV, import the
-same ZIP into TEST, and promote that tested artifact to PROD after human
-validation and environment approval.
+experience in Studio in TEST, validate the source agent, then export its
+**managed** solution and promote that ZIP to PROD after human validation and
+environment approval.
 
 Use `harness-release.yml` followed by `harness-promote.yml`. The initial agent
 creation is manual; `harness-agent/instructions.md` supplies the authoring content,
-not a deployable YAML definition. The scenario requires three new configured
-environments and live tenant verification. It does not convert Travel Concierge,
-reuse its unmanaged solution, or claim that local tests validate the harness.
+not a deployable YAML definition. The scenario reuses the existing
+`copilot-studio-test` and `copilot-studio-prod` GitHub Environments and requires
+live tenant verification. The managed ZIP is not import-tested before PROD in this
+two-environment workshop. It does not convert Travel Concierge, reuse its unmanaged
+solution, or claim that local tests validate the harness.
 The remainder of this README describes the original Travel Concierge scenario.
 
 ## Safety and scope

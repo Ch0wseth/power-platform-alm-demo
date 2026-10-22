@@ -1,6 +1,6 @@
 ---
 title: GitHub Copilot Harness ALM workshop
-description: Create a separate harness agent in Studio and move its managed solution through DEV, TEST, and PROD.
+description: Create and validate a separate harness agent in TEST, then promote its managed export to PROD.
 ---
 
 ## Scenario and boundaries
@@ -17,28 +17,35 @@ overwrite, or package that standard-harness agent. The Markdown instructions in
 There is deliberately no template-YAML route for this scenario.
 
 ```text
-Create in Studio DEV (once, manual GitHub Copilot Harness selection)
-  -> unmanaged source solution in DEV
+Create in Studio TEST (once, manual GitHub Copilot Harness selection)
+  -> unmanaged source solution in TEST
+  -> inspect the source agent and run acceptance cases manually
   -> export managed ZIP and seal its SHA-256
-  -> import that ZIP into a different TEST environment
-  -> inspect the imported agent and run acceptance cases manually
-  -> dispatch promotion with explicit test attestation
+  -> dispatch promotion with explicit source-test attestation
   -> approve the GitHub production environment
-  -> import the identical managed ZIP into a third PROD environment
+  -> import the identical managed ZIP into a different PROD environment
   -> inspect production, then publish only with owner approval
 ```
 
 > [!IMPORTANT]
 > The pipelines and local validators can be checked without a tenant, but that
 > does not establish a successful live harness migration. Create the agent and
-> verify its round trip in your tenant before using this scenario as a live demo.
+> verify its migration in your tenant before using this scenario as a live demo.
 > The scripts validate the solution identity, managed flag, agent presence,
-> artifact hash, run provenance, and environment separation. They do not infer
+> artifact hash, export provenance, and environment separation. They do not infer
 > the runtime harness from a bot XML file or prove that all components survived.
+
+> [!WARNING]
+> This workshop uses only TEST and PROD. Functional tests run on the unmanaged
+> source agent in TEST. The exported managed ZIP is **not imported or
+> functionally tested before PROD**. Approval accepts this workshop limitation;
+> it is not evidence that the import or the imported agent already passed.
+> A production-grade release should validate the same managed artifact in a
+> separate downstream non-production environment before promoting it.
 
 ## Create the new agent in Studio
 
-1. Select a dedicated DEV Power Platform environment with Dataverse, access to
+1. Select the existing TEST Power Platform environment with Dataverse, access to
    the GitHub Copilot Harness experience, and sufficient Copilot Credits.
 2. From the Copilot Studio home page, create a new agent **powered by the GitHub
    Copilot Harness**. Confirm the choice in Studio; do not use the standard
@@ -54,11 +61,11 @@ Create in Studio DEV (once, manual GitHub Copilot Harness selection)
    Add the new agent and its required objects. Use the solution explorer available
    in your tenant; review dependencies before exporting.
 6. Find the agent's actual schema name in the solution. It must use the `ppdemo_`
-   prefix; record it as the DEV GitHub Environment variable
+   prefix; record it as the TEST GitHub Environment variable
    `HARNESS_AGENT_SCHEMA`. Do not use its display name, GUID, or the schema of
    Travel Concierge. If your agent was created with another publisher prefix,
    recreate this demo in the intended publisher context rather than editing ZIPs.
-7. Run the acceptance cases below in DEV. Save changes using Studio and check that
+7. Run the acceptance cases below in TEST. Save changes using Studio and check that
    the solution contains the current instructions before exporting.
 
 Microsoft documents harness selection at creation time and no transfer between
@@ -67,19 +74,18 @@ standard and GitHub Copilot harnesses. This repository does not invent a
 
 ## Configure the GitHub environments
 
-Create these **new**, separate GitHub Environments:
+Reuse these **existing** GitHub Environments and their configured identities:
 
 | GitHub Environment     | Power Platform target | Purpose                       |
 |------------------------|-----------------------|-------------------------------|
-| `copilot-harness-dev`   | DEV                   | Export the source solution     |
-| `copilot-harness-test`  | TEST                  | Import and inspect the release |
-| `copilot-harness-prod`  | PROD                  | Approve and deploy the release |
+| `copilot-studio-test`   | TEST                  | Author, test and export source |
+| `copilot-studio-prod`   | PROD                  | Approve and deploy the release |
 
 Each needs environment secrets `PP_TENANT_ID`, `PP_APPLICATION_ID`,
 `PP_ENVIRONMENT_ID`, and `PP_ENVIRONMENT_URL`, using that target's values.
-The three Power Platform environment IDs must differ. The scripts compare their
-fingerprints to prevent a same-environment workshop round trip without exposing
-the raw IDs in release receipts.
+The two Power Platform environment IDs must differ. The script compares their
+fingerprints to prevent importing into the source environment without exposing
+raw IDs in the export manifest.
 
 Configure a dedicated Entra deployment application per target with a federated
 credential trusting only this repository and the corresponding GitHub Environment.
@@ -90,49 +96,52 @@ Add each application as a Dataverse application user with the permissions needed
 to export or import the solution and author its components; **System Customizer**
 is the workshop starting point, subject to your tenant's requirements.
 
-Restrict all three GitHub Environments to `main`. For `copilot-harness-prod`,
+Restrict both GitHub Environments to `main`. For `copilot-studio-prod`,
 configure required reviewers and disable administrator bypass. In a team, prevent
 self-review and require an independent approver. For a single-person workshop,
 any self-review exception must be explicit. These protection settings are outside
 Git; a workflow's `environment:` declaration does not itself require approval.
 
-Set `HARNESS_AGENT_SCHEMA` only in `copilot-harness-dev` using the schema recorded
-during bootstrap. Do not reuse the Travel Concierge solution or identities.
+Set `HARNESS_AGENT_SCHEMA` only in `copilot-studio-test` using the schema recorded
+during bootstrap. Reuse the existing target-specific deployment identities, but
+do not reuse the Travel Concierge solution or agent schema.
 Do not commit tenant IDs, environment URLs, credentials, or live exports.
 
-## Export DEV and deploy TEST
+## Validate TEST and export the managed release
 
-Run **Export GitHub Harness agent and deploy to test** (`harness-release.yml`)
-from `main`. Confirm `source_harness_verified` only after checking the source
-agent uses the intended harness and its solution has the required objects.
+Run the source acceptance cases and inspect the agent as described below. Then
+run **Export validated GitHub Harness agent from test** (`harness-release.yml`)
+from `main`. Confirm `source_harness_verified` only after checking the harness,
+settings, solution dependencies, acceptance cases, and synthetic-only content.
 
-The DEV job exports `ppdemo_HarnessReleaseAdvisor` using `pac solution export
+The TEST job exports `ppdemo_HarnessReleaseAdvisor` using `pac solution export
 --managed true`. It does not rebuild the agent from repository files, publish it,
 or modify the source solution into a managed solution. It verifies the ZIP's
 solution name, publisher prefix, managed flag, version, and configured bot entry.
-It records the hash and release run/attempt in `release.json`.
+It records the hash, release run/attempt, environment fingerprint and explicit
+`source-agent-only` validation scope in `release.json`. It uploads
+`harness-export-<attempt>`. It does not import anything back into TEST.
 
-The TEST job downloads that exact attempt's export, verifies it, rejects a target
-equal to DEV, authenticates with TEST's OIDC identity, and imports the managed ZIP.
-Only after a successful import does it write `test.json` and upload
-`harness-tested-release-<attempt>`. The receipt proves the workflow's import
-completed, **not** that the conversation or harness has been validated.
+Do not change the source agent between its acceptance checks and export.
+If it changes, repeat the checks and export. Source validation is a human
+attestation, not an automated conversation test or an import-test receipt.
 
 Artifacts expire after three days and can be read by people with artifact access
-to this public repository. Use synthetic content only. Receipts omit raw tenant
+to this public repository. Use synthetic content only. The manifest omits raw tenant
 and environment identifiers, but the Dataverse ZIP itself must still be treated
 as exported environment content.
 
-If a job fails, correct the issue in DEV/configuration and start a new release or
+If a job fails, correct the issue in TEST/configuration and start a new release or
 rerun **all jobs**. Partial reruns deliberately cannot reuse a prior attempt's
-export or test receipt. No workflow silently falls back to an old artifact.
+export. No workflow silently falls back to an old artifact.
 
-## Inspect and test the imported agent
+## Inspect and test the source agent
 
-In TEST, open the imported agent and confirm the GitHub Copilot Harness experience
-is preserved. Compare instructions, model, authentication, tools/knowledge/skills,
-and publication/channel state against DEV. Do not edit the managed release in
-TEST. Fix issues in DEV, increment the solution version, and export a new release.
+In TEST, open the source agent and confirm the GitHub Copilot Harness experience.
+Review instructions, model, authentication, tools/knowledge/skills, and
+publication/channel state. Fix issues here and repeat acceptance checks before
+exporting. Do not overwrite Travel Concierge or import this managed ZIP into TEST,
+where the unmanaged source solution lives.
 
 Use synthetic packets; replace the sample hash below with a fictional 64-character
 hex value when testing the conversation. No test requires real deployment data.
@@ -153,6 +162,9 @@ Independent human approval: missing
 Expected decision: HOLD. Then report the harness/settings review and independent
 approval as complete. The agent should produce READY FOR HUMAN RELEASE DECISION
 while making clear that it has not independently verified the supplied claims.
+This packet describes a fictional release with imported-artifact evidence.
+For this repository's two-environment release, explicitly report that only the
+source agent was tested; the advisor should warn that import evidence is missing.
 
 | Case | Input | Expected |
 |------|-------|----------|
@@ -171,22 +183,24 @@ Do not publish conversation transcripts as GitHub artifacts. Keep sanitized
 pass/fail notes in an approved private location. A green Actions run means PAC
 completed, not that the agent passed these cases.
 
-## Promote the tested managed artifact
+## Promote the managed export from the validated source
 
 Run **Promote validated GitHub Harness agent to production**
-(`harness-promote.yml`) on `main`. Supply the successful release run ID and check
-`test_validated` only after the TEST inspection and acceptance cases pass.
+(`harness-promote.yml`) on `main`. Supply the successful export run ID and check
+`test_validated` only after reviewing the source validation and acknowledging that
+the exported ZIP has not been import-tested before PROD.
 
 The credential-free validation job verifies a successful release from this
-repository's `main`, its exact workflow, and a successful TEST import and receipt
-upload in its latest attempt. It downloads that attempt's tested artifact, checks
-the manifest and receipt, and freezes it for this promotion. It does not re-export
-DEV or rebuild anything while production approval is pending.
+repository's `main`, its exact workflow, and successful export, sealing and
+artifact upload steps in its latest attempt. It downloads that attempt's export,
+checks the manifest and validation scope, and freezes it for this promotion.
+It does not re-export TEST or rebuild while production approval is pending.
 
 Approve the production environment only after reviewing the release run,
 version, SHA-256, and functional evidence. The production job then receives its
 own OIDC permissions/secrets, checks the same payload again, rejects PROD equal
-to DEV or TEST, and imports the exact managed ZIP.
+to TEST, and imports the exact managed ZIP. It shares the existing production
+concurrency group with the Travel Concierge promotion to avoid overlapping imports.
 
 After import, inspect the agent in PROD, confirm the policy marker and harness,
 review authentication, access, and channels, and publish only when approved.
@@ -197,8 +211,8 @@ guarantee.
 ## Updating the agent and recovering from failure
 
 For the second workshop release, change the policy marker to `harness-alm-v2`
-in DEV, add a small instruction improvement, and increase the solution's four-part
-version. Repeat the full export, TEST, acceptance, and promotion sequence.
+in TEST, add a small instruction improvement, and increase the solution's four-part
+version. Repeat the source acceptance, export, and promotion sequence.
 Confirm the new marker in TEST and PROD to demonstrate the imported behavior
 changed, rather than only showing a successful file transfer.
 

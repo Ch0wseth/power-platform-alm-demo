@@ -12,14 +12,13 @@ from harness_release import (
     check_configuration,
     check_source_configuration,
     main,
-    record_test,
     seal_export,
     verify_payload,
-    verify_test_run,
+    verify_export_run,
 )
 
 
-DEV = "11111111-1111-4111-8111-111111111111"
+TENANT = "11111111-1111-4111-8111-111111111111"
 TEST = "22222222-2222-4222-8222-222222222222"
 PROD = "33333333-3333-4333-8333-333333333333"
 SCHEMA = "ppdemo_HarnessAdvisor"
@@ -33,9 +32,9 @@ class HarnessReleaseTests(unittest.TestCase):
         env = patch.dict(
             os.environ,
             {
-                "PP_TENANT_ID": DEV,
+                "PP_TENANT_ID": TENANT,
                 "PP_APPLICATION_ID": TEST,
-                "PP_ENVIRONMENT_ID": DEV,
+                "PP_ENVIRONMENT_ID": TEST,
                 "PP_ENVIRONMENT_URL": "https://demo.crm.dynamics.com",
                 "HARNESS_AGENT_SCHEMA": SCHEMA,
                 "SOURCE_HARNESS_VERIFIED": "true",
@@ -58,16 +57,14 @@ class HarnessReleaseTests(unittest.TestCase):
             )
             archive.writestr(f"bots/{schema}/bot.xml", "<bot />")
 
-    def test_exact_managed_payload_can_move_dev_test_prod(self):
+    def test_exact_managed_payload_can_move_test_prod_without_claiming_an_import_test(self):
         check_configuration()
         evidence = seal_export(self.folder)
-        verify_payload(self.folder, "123", "2", target=TEST)
-        with patch.dict(os.environ, {"PP_ENVIRONMENT_ID": TEST}):
-            record_test(self.folder, "123", "2")
-        result = verify_payload(self.folder, "123", "2", tested=True, target=PROD)
+        result = verify_payload(self.folder, "123", "2", target=PROD)
         self.assertEqual(result, evidence)
-        self.assertNotIn(DEV, (self.folder / "release.json").read_text())
-        self.assertNotIn(TEST, (self.folder / "test.json").read_text())
+        self.assertNotIn(TEST, (self.folder / "release.json").read_text())
+        self.assertEqual(result["validation_scope"], "source-agent-only")
+        self.assertFalse((self.folder / "test.json").exists())
 
     def test_rejects_unmanaged_wrong_solution_or_missing_agent(self):
         for kwargs in (
@@ -108,7 +105,7 @@ class HarnessReleaseTests(unittest.TestCase):
                 "GITHUB_REPOSITORY": "owner/repo",
                 "GITHUB_OUTPUT": str(output),
             }),
-            patch("harness_release.verify_test_run", return_value="2") as verify,
+            patch("harness_release.verify_export_run", return_value="2") as verify,
         ):
             main()
             verify.assert_called_once_with("owner/repo", "123")
@@ -128,25 +125,21 @@ class HarnessReleaseTests(unittest.TestCase):
     def test_prevents_same_environment_imports(self):
         seal_export(self.folder)
         with self.assertRaises(ValueError):
-            verify_payload(self.folder, "123", "2", target=DEV)
-        with patch.dict(os.environ, {"PP_ENVIRONMENT_ID": TEST}):
-            record_test(self.folder, "123", "2")
-        for target in (DEV, TEST):
-            with self.subTest(target=target), self.assertRaises(ValueError):
-                verify_payload(self.folder, "123", "2", tested=True, target=target)
+            verify_payload(self.folder, "123", "2", target=TEST)
 
-    def test_promotion_requires_matching_test_receipt(self):
+    def test_promotion_rejects_a_different_validation_scope_or_missing_attestation(self):
         seal_export(self.folder)
-        with self.assertRaises(FileNotFoundError):
-            verify_payload(self.folder, "123", "2", tested=True)
-        with patch.dict(os.environ, {"PP_ENVIRONMENT_ID": TEST}):
-            record_test(self.folder, "123", "2")
-        receipt_path = self.folder / "test.json"
-        receipt = json.loads(receipt_path.read_text())
-        receipt["sha256"] = "0" * 64
-        receipt_path.write_text(json.dumps(receipt))
-        with self.assertRaises(ValueError):
-            verify_payload(self.folder, "123", "2", tested=True)
+        path = self.folder / "release.json"
+        evidence = json.loads(path.read_text())
+        for changes in (
+            {"validation_scope": "import-tested"},
+            {"source_acceptance_attested": False},
+            {"source_harness_attested": False},
+        ):
+            with self.subTest(changes=changes):
+                path.write_text(json.dumps({**evidence, **changes}))
+                with self.assertRaises(ValueError):
+                    verify_payload(self.folder, "123", "2")
 
     def test_configuration_rejects_missing_secret_and_portal_url(self):
         for changes in (
@@ -158,7 +151,7 @@ class HarnessReleaseTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     check_configuration()
 
-    def test_only_completed_import_in_latest_attempt_is_trusted(self):
+    def test_only_completed_export_in_latest_attempt_is_trusted(self):
         run = {
             "status": "completed",
             "conclusion": "success",
@@ -169,25 +162,25 @@ class HarnessReleaseTests(unittest.TestCase):
             "run_attempt": 2,
         }
         names = (
-            "Verify managed payload for test",
-            "Import managed harness solution",
-            "Record tested payload",
-            "Upload tested release",
+            "Check source configuration and attestation",
+            "Export managed harness solution",
+            "Seal managed payload",
+            "Upload managed export",
         )
         jobs = {"jobs": [{
             "conclusion": "success",
             "steps": [{"name": name, "conclusion": "success"} for name in names],
         }]}
         with patch("harness_release.gh", side_effect=[json.dumps(run), json.dumps(jobs)]) as gh:
-            self.assertEqual(verify_test_run("owner/repo", "123"), "2")
+            self.assertEqual(verify_export_run("owner/repo", "123"), "2")
             self.assertIn("/attempts/2/jobs", gh.call_args.args[1])
         jobs["jobs"][0]["steps"][1]["conclusion"] = "skipped"
         with patch("harness_release.gh", side_effect=[json.dumps(run), json.dumps(jobs)]):
             with self.assertRaises(ValueError):
-                verify_test_run("owner/repo", "123")
+                verify_export_run("owner/repo", "123")
         with patch("harness_release.gh", return_value=json.dumps({**run, "head_branch": "feature"})):
             with self.assertRaises(ValueError):
-                verify_test_run("owner/repo", "123")
+                verify_export_run("owner/repo", "123")
 
 
 if __name__ == "__main__":
