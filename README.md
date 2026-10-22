@@ -8,6 +8,21 @@ Plan a fictional three-day / two-night city break for one adult in Lisbon, Rome 
 
 This is an original, simplified demo of the [public Microsoft travel-concierge scenario](https://learn.microsoft.com/power-platform/architecture/solution-ideas/agent-travel-customer), not an official Zava asset or a copy of an internal demo.
 
+## Separate GitHub Copilot Harness ALM scenario
+
+The [GitHub Copilot Harness workshop](docs/github-harness-alm.md) adds a second,
+independent scenario: create **ALM Release Advisor** in the GitHub Copilot Harness
+experience in Studio, then export its **managed** solution from DEV, import the
+same ZIP into TEST, and promote that tested artifact to PROD after human
+validation and environment approval.
+
+Use `harness-release.yml` followed by `harness-promote.yml`. The initial agent
+creation is manual; `harness-agent/instructions.md` supplies the authoring content,
+not a deployable YAML definition. The scenario requires three new configured
+environments and live tenant verification. It does not convert Travel Concierge,
+reuse its unmanaged solution, or claim that local tests validate the harness.
+The remainder of this README describes the original Travel Concierge scenario.
+
 ## Safety and scope
 
 - The agent has **no booking, payment, inventory, weather or customer-data connections**.
