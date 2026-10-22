@@ -1,0 +1,36 @@
+name: Validate harness ALM helpers
+
+on:
+  pull_request:
+    paths:
+      - "scripts/**"
+      - ".github/workflows/harness-*.yml"
+      - ".github/workflows/validate-harness.yml"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/**"
+      - ".github/workflows/harness-*.yml"
+      - ".github/workflows/validate-harness.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  test:
+    name: Check release and promotion failure handling
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Check out tests
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run focused Python tests
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'

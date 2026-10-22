@@ -1,0 +1,133 @@
+name: Promote validated GitHub Harness agent to production
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_run_id:
+        description: Successful Export GitHub Harness agent and deploy to test run
+        type: string
+        required: true
+      test_validated:
+        description: I checked the GitHub Copilot Harness, instructions, model, and acceptance cases in TEST for this release
+        type: boolean
+        required: true
+        default: false
+
+concurrency:
+  group: harness-promotion
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  validate:
+    name: Validate test evidence and freeze production payload
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      attempt: ${{ steps.provenance.outputs.attempt }}
+    env:
+      RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+    steps:
+      - name: Check out release validation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify successful test deployment and attestation
+        id: provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TEST_VALIDATED: ${{ inputs.test_validated }}
+        run: python3 scripts/harness_release.py provenance
+
+      - name: Download the tested release
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: harness-tested-release-${{ steps.provenance.outputs.attempt }}
+          path: release
+          run-id: ${{ inputs.release_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Verify tested payload
+        env:
+          RELEASE_RUN_ATTEMPT: ${{ steps.provenance.outputs.attempt }}
+        run: python3 scripts/harness_release.py verify --tested
+
+      - name: Freeze approved payload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: harness-approved-${{ github.run_attempt }}
+          path: release/*
+          if-no-files-found: error
+          retention-days: 3
+
+  production:
+    name: Import approved managed payload into PROD
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: copilot-harness-prod
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      PP_TENANT_ID: ${{ secrets.PP_TENANT_ID }}
+      PP_APPLICATION_ID: ${{ secrets.PP_APPLICATION_ID }}
+      PP_ENVIRONMENT_ID: ${{ secrets.PP_ENVIRONMENT_ID }}
+      PP_ENVIRONMENT_URL: ${{ secrets.PP_ENVIRONMENT_URL }}
+      RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+      RELEASE_RUN_ATTEMPT: ${{ needs.validate.outputs.attempt }}
+    steps:
+      - name: Check out release validation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download approved payload
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: harness-approved-${{ github.run_attempt }}
+          path: release
+
+      - name: Verify managed payload for production
+        run: |
+          set -euo pipefail
+          python3 scripts/harness_release.py config
+          python3 scripts/harness_release.py verify --tested --target
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Authenticate to PROD using GitHub OIDC
+        id: authenticate
+        run: >-
+          dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes auth create
+          --name harness-prod --githubFederated
+          --tenant "$PP_TENANT_ID"
+          --applicationId "$PP_APPLICATION_ID"
+          --environment "$PP_ENVIRONMENT_URL"
+
+      - name: Verify production environment
+        run: >-
+          dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes org who
+          --environment "$PP_ENVIRONMENT_ID"
+
+      - name: Import approved managed harness solution
+        run: >-
+          dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes solution import
+          --environment "$PP_ENVIRONMENT_ID"
+          --path release/ppdemo_HarnessReleaseAdvisor_managed.zip
+          --async --max-async-wait-time 30
+
+      - name: Report production payload
+        run: python3 scripts/harness_release.py verify --tested --target
+
+      - name: Remove runner authentication profile
+        if: always() && (steps.authenticate.outcome == 'success' || steps.authenticate.outcome == 'failure')
+        run: dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes auth clear
