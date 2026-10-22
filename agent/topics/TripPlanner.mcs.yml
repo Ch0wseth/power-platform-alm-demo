@@ -59,8 +59,18 @@ beginDialog:
       interruptionPolicy:
         allowInterruption: true
       variable: init:Topic.Preferences
-      prompt: What is your travel style - food, culture or a relaxed pace? Use fictional preferences only. The itinerary below is a fixed example, not a live personalized search.
-      entity: StringPrebuiltEntity
+      prompt: Which travel style do you prefer? Choose one option. The itinerary below is a fixed example, not a live personalized search.
+      entity:
+        kind: EmbeddedEntity
+        definition:
+          kind: ClosedListEntity
+          items:
+            - id: Food
+              displayName: Food
+            - id: Culture
+              displayName: Culture
+            - id: RelaxedPace
+              displayName: Relaxed pace
     - kind: ConditionGroup
       id: selectSample
       conditions:

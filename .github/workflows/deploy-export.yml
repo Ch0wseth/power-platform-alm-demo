@@ -69,13 +69,34 @@ jobs:
           echo "Export run: $EXPORT_RUN_ID" >> "$GITHUB_STEP_SUMMARY"
           echo "Export workflow commit: $(jq -r .head_sha run.json)" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Download trusted export
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - name: Sign in to Azure using GitHub OIDC
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
-          name: travel-studio-export
-          path: export
-          run-id: ${{ inputs.export_run_id }}
-          github-token: ${{ github.token }}
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Download trusted export
+        env:
+          EXPORT_RUN_ID: ${{ inputs.export_run_id }}
+          STORAGE_ACCOUNT: ${{ vars.EXPORT_STORAGE_ACCOUNT }}
+          STORAGE_CONTAINER: ${{ vars.EXPORT_STORAGE_CONTAINER }}
+        run: |
+          set -euo pipefail
+          echo "Export run: $EXPORT_RUN_ID"
+          mkdir -p export
+          names=$(az storage blob list --auth-mode login \
+            --account-name "$STORAGE_ACCOUNT" --container-name "$STORAGE_CONTAINER" \
+            --prefix "exports/$EXPORT_RUN_ID/" --query '[].name' -o tsv --only-show-errors)
+          if [[ -z "$names" ]]; then
+            echo "::error::No private export found for run $EXPORT_RUN_ID"
+            exit 1
+          fi
+          while IFS= read -r name; do
+            az storage blob download --auth-mode login \
+              --account-name "$STORAGE_ACCOUNT" --container-name "$STORAGE_CONTAINER" \
+              --name "$name" --file "export/${name##*/}" --only-show-errors
+          done <<< "$names"
 
       - name: Verify selected export
         env:

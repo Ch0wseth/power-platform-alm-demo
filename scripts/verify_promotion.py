@@ -40,8 +40,18 @@ def verify_test_steps(jobs, deployment_format):
 
 
 def verify_export_reference(log, export_run_id):
-    # The pinned artifact-download action logs its evaluated run-id input.
-    if not re.search(rf"\brun-id:\s*{re.escape(export_run_id)}\s*$", log, re.MULTILINE):
+    # The download step prints the evaluated export run id before reading Blob.
+    references = []
+    for line in log.splitlines():
+        fields = line.split("\t", 2)
+        if len(fields) != 3 or fields[1] != "Download trusted export":
+            continue
+        match = re.fullmatch(
+            r"\S+[ \t]+Export run:[ \t]*([1-9][0-9]*)[ \t]*", fields[2]
+        )
+        if match:
+            references.append(match.group(1))
+    if references != [export_run_id]:
         raise ValueError("Test deployment did not download the specified export")
 
 

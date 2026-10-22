@@ -40,12 +40,56 @@ class PromotionEvidenceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             verify_test_steps(jobs("success"), "template")
 
-    def test_artifact_run_reference_must_match_exactly(self):
-        log = "deploy\tDownload trusted export\t2026-10-21T15:47:07Z   run-id: 12345\n"
+    def test_export_run_reference_must_match_exactly(self):
+        log = "deploy\tDownload trusted export\t2026-10-21T15:47:07Z   Export run: 12345\n"
         verify_export_reference(log, "12345")
         for other in ("1234", "123456"):
             with self.subTest(other=other), self.assertRaises(ValueError):
                 verify_export_reference(log, other)
+
+    def test_export_run_reference_requires_exact_download_step(self):
+        for step in (
+            "Verify selected export",
+            "Other Download trusted export",
+            "Download trusted export extra",
+        ):
+            log = f"deploy\t{step}\t2026-10-21T15:47:07Z   Export run: 12345\n"
+            with self.subTest(step=step), self.assertRaises(ValueError):
+                verify_export_reference(log, "12345")
+            log += (
+                "deploy\tDownload trusted export\t"
+                "2026-10-21T15:47:08Z   Export run: 67890\n"
+            )
+            with self.subTest(step=step, wrong_export=True), self.assertRaises(ValueError):
+                verify_export_reference(log, "12345")
+
+    def test_prefixed_artifact_run_markers_are_not_evidence(self):
+        for marker in ("other Export run", "prefix:Export run", "prefix Export run"):
+            log = (
+                "deploy\tDownload trusted export\t"
+                f"2026-10-21T15:47:07Z   {marker}: 12345\n"
+            )
+            with self.subTest(marker=marker), self.assertRaises(ValueError):
+                verify_export_reference(log, "12345")
+
+    def test_missing_artifact_run_reference_is_not_evidence(self):
+        for log in (
+            "",
+            "deploy\tDownload trusted export\t2026-10-21T15:47:07Z   account: example\n",
+            "deploy\tDownload trusted export\t2026-10-21T15:47:07Z   Export run:\n12345\n",
+        ):
+            with self.subTest(log=log), self.assertRaises(ValueError):
+                verify_export_reference(log, "12345")
+
+    def test_ambiguous_artifact_run_references_are_not_evidence(self):
+        log = "deploy\tDownload trusted export\t2026-10-21T15:47:07Z   Export run: 12345\n"
+        for other in ("12345", "67890"):
+            duplicate = (
+                "deploy\tDownload trusted export\t"
+                f"2026-10-21T15:47:08Z   Export run: {other}\n"
+            )
+            with self.subTest(other=other), self.assertRaises(ValueError):
+                verify_export_reference(log + duplicate, "12345")
 
 
 if __name__ == "__main__":
