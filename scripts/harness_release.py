@@ -50,13 +50,16 @@ def check_source_configuration():
     check_configuration()
     if os.environ.get("SOURCE_HARNESS_VERIFIED") != "true":
         raise ValueError("Confirm the harness, source acceptance tests and settings in TEST first")
-    if not re.fullmatch(r"ppdemo_[A-Za-z0-9_]+", os.environ.get("HARNESS_AGENT_SCHEMA", "")):
-        raise ValueError("Set HARNESS_AGENT_SCHEMA to the TEST agent's ppdemo_ schema")
+    validate_agent_schema(os.environ.get("HARNESS_AGENT_SCHEMA", ""))
+
+
+def validate_agent_schema(schema):
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+", schema):
+        raise ValueError("Set HARNESS_AGENT_SCHEMA to the actual agent schema name from Studio")
 
 
 def validate_solution(folder, schema):
-    if not re.fullmatch(r"ppdemo_[A-Za-z0-9_]+", schema):
-        raise ValueError("Expected a ppdemo_ agent schema name")
+    validate_agent_schema(schema)
     payload = folder / FILENAME
     with zipfile.ZipFile(payload) as archive:
         if archive.testzip() is not None:

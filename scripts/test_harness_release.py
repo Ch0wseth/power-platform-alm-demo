@@ -85,6 +85,21 @@ class HarnessReleaseTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 check_source_configuration()
 
+    def test_studio_generated_publisher_prefix_is_preserved(self):
+        schema = "craf4_almreleaseadvisor_Demo"
+        self.make_zip(schema=schema)
+        with patch.dict(os.environ, {"HARNESS_AGENT_SCHEMA": schema}):
+            evidence = seal_export(self.folder)
+        self.assertEqual(evidence["agent_schema"], schema)
+        verify_payload(self.folder, "123", "2", target=PROD)
+
+    def test_schema_cannot_contain_paths_or_omit_publisher_prefix(self):
+        for schema in ("../bot", "prefix_../bot", "prefix_bot/bot", "bot", ""):
+            with self.subTest(schema=schema):
+                with patch.dict(os.environ, {"HARNESS_AGENT_SCHEMA": schema}):
+                    with self.assertRaises(ValueError):
+                        seal_export(self.folder)
+
     def test_promotion_cli_rejects_missing_functional_attestation_before_api_access(self):
         with (
             patch("sys.argv", ["harness_release.py", "provenance"]),
