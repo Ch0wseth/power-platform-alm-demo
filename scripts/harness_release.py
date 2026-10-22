@@ -53,6 +53,13 @@ def check_source_configuration():
     validate_agent_schema(os.environ.get("HARNESS_AGENT_SCHEMA", ""))
 
 
+def check_environment_identity():
+    actual = uuid.UUID(os.environ["ACTUAL_ENVIRONMENT_ID"])
+    expected = uuid.UUID(os.environ["PP_ENVIRONMENT_ID"])
+    if actual != expected:
+        raise ValueError("Authenticated environment differs from the configured target")
+
+
 def validate_agent_schema(schema):
     if not re.fullmatch(r"[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+", schema):
         raise ValueError("Set HARNESS_AGENT_SCHEMA to the actual agent schema name from Studio")
@@ -150,11 +157,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "operation",
-        choices=("config", "source-config", "seal", "verify", "provenance"),
+        choices=("config", "source-config", "identity", "seal", "verify", "provenance"),
     )
     parser.add_argument("--folder", type=Path, default=Path("release"))
     parser.add_argument("--target", action="store_true")
     args = parser.parse_args()
+    if args.operation == "identity":
+        check_environment_identity()
+        return
     if args.operation == "config":
         check_configuration()
         return

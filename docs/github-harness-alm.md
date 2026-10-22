@@ -129,13 +129,29 @@ Do not commit tenant IDs, environment URLs, credentials, or live exports.
 
 ## Validate TEST and export the managed release
 
+Both Harness workflows use Microsoft's official
+[`powerplatform-actions`](https://github.com/microsoft/powerplatform-actions),
+pinned to a commit: `actions-install`, `who-am-i`, `export-solution` in TEST,
+and `import-solution` in PROD. These are solution-level actions for the container
+holding the Copilot Studio agent, not YAML agent creation or a harness conversion.
+Export and import run in GitHub Actions, not on an operator's workstation.
+The existing TEST and PROD environments are reused; neither workflow creates or
+resets an environment.
+
+Authentication uses the existing target-specific application and tenant IDs with
+GitHub OIDC (`id-token: write`). Omitting `client-secret` selects the actions'
+workload identity federation flow. No user/password or new client secret is
+required. The authenticated environment ID returned by `who-am-i` must match the
+configured target before export or import.
+
 Run the source acceptance cases and inspect the agent as described below. Then
 run **Export validated GitHub Harness agent from test** (`harness-release.yml`)
 from `main`. Confirm `source_harness_verified` only after checking the harness,
 settings, solution dependencies, acceptance cases, and synthetic-only content.
 
-The TEST job exports `ppdemo_HarnessReleaseAdvisor` using `pac solution export
---managed true`. It does not rebuild the agent from repository files, publish it,
+The TEST job exports `ppdemo_HarnessReleaseAdvisor` using the
+`microsoft/powerplatform-actions/export-solution` action with `managed: true`.
+The action uses PAC internally. It does not rebuild the agent from repository files, publish it,
 or modify the source solution into a managed solution. It verifies the ZIP's
 solution name, publisher prefix, managed flag, version, and configured bot entry.
 It records the hash, release run/attempt, environment fingerprint and explicit
@@ -219,7 +235,10 @@ It does not re-export TEST or rebuild while production approval is pending.
 Approve the production environment only after reviewing the release run,
 version, SHA-256, and functional evidence. The production job then receives its
 own OIDC permissions/secrets, checks the same payload again, rejects PROD equal
-to TEST, and imports the exact managed ZIP. It shares the existing production
+to TEST, and imports the exact managed ZIP using
+`microsoft/powerplatform-actions/import-solution`. Publication is explicitly
+disabled with `publish-changes: false`; forced overwrite and skipping dependency
+checks are disabled as well. It shares the existing production
 concurrency group with the Travel Concierge promotion to avoid overlapping imports.
 
 After import, inspect the agent in PROD, confirm the policy marker and harness,

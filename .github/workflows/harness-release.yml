@@ -49,27 +49,36 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
-      - name: Authenticate to TEST using GitHub OIDC
-        id: authenticate
-        run: >-
-          dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes auth create
-          --name harness-test --githubFederated
-          --tenant "$PP_TENANT_ID"
-          --applicationId "$PP_APPLICATION_ID"
-          --environment "$PP_ENVIRONMENT_URL"
+      - name: Install Microsoft Power Platform actions tools
+        id: tools
+        uses: microsoft/powerplatform-actions/actions-install@6e91314a9c6e694ea5c894fe8c40e09d73aa892b # v1
+        with:
+          add-tools-to-path: true
 
       - name: Verify source environment
-        run: >-
-          dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes org who
-          --environment "$PP_ENVIRONMENT_ID"
+        id: identity
+        uses: microsoft/powerplatform-actions/who-am-i@6e91314a9c6e694ea5c894fe8c40e09d73aa892b # v1
+        with:
+          environment-url: ${{ secrets.PP_ENVIRONMENT_URL }}
+          app-id: ${{ secrets.PP_APPLICATION_ID }}
+          tenant-id: ${{ secrets.PP_TENANT_ID }}
+
+      - name: Check source environment matches configuration
+        env:
+          ACTUAL_ENVIRONMENT_ID: ${{ steps.identity.outputs.environment-id }}
+        run: python3 scripts/harness_release.py identity
 
       - name: Export managed harness solution
-        run: >-
-          dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes solution export
-          --environment "$PP_ENVIRONMENT_ID"
-          --name ppdemo_HarnessReleaseAdvisor
-          --path release/ppdemo_HarnessReleaseAdvisor_managed.zip
-          --managed true --async --max-async-wait-time 30
+        uses: microsoft/powerplatform-actions/export-solution@6e91314a9c6e694ea5c894fe8c40e09d73aa892b # v1
+        with:
+          environment-url: ${{ secrets.PP_ENVIRONMENT_URL }}
+          app-id: ${{ secrets.PP_APPLICATION_ID }}
+          tenant-id: ${{ secrets.PP_TENANT_ID }}
+          solution-name: ppdemo_HarnessReleaseAdvisor
+          solution-output-file: release/ppdemo_HarnessReleaseAdvisor_managed.zip
+          managed: true
+          run-asynchronously: true
+          max-async-wait-time: 30
 
       - name: Seal managed payload
         run: python3 scripts/harness_release.py seal
@@ -83,5 +92,5 @@ jobs:
           retention-days: 3
 
       - name: Remove runner authentication profile
-        if: always() && (steps.authenticate.outcome == 'success' || steps.authenticate.outcome == 'failure')
-        run: dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes auth clear
+        if: always() && steps.tools.outcome == 'success'
+        run: pac auth clear

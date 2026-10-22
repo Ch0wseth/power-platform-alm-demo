@@ -10,6 +10,7 @@ from harness_release import (
     FILENAME,
     SOLUTION,
     check_configuration,
+    check_environment_identity,
     check_source_configuration,
     main,
     seal_export,
@@ -84,6 +85,19 @@ class HarnessReleaseTests(unittest.TestCase):
         with patch.dict(os.environ, {"HARNESS_AGENT_SCHEMA": ""}):
             with self.assertRaises(ValueError):
                 check_source_configuration()
+
+    def test_action_identity_must_match_configured_environment(self):
+        with patch.dict(os.environ, {"ACTUAL_ENVIRONMENT_ID": TEST.upper()}):
+            check_environment_identity()
+        for actual in (PROD, "", "not-an-environment-id"):
+            with self.subTest(actual=actual):
+                with patch.dict(os.environ, {"ACTUAL_ENVIRONMENT_ID": actual}):
+                    with self.assertRaises(ValueError):
+                        check_environment_identity()
+        with patch.dict(os.environ):
+            os.environ.pop("ACTUAL_ENVIRONMENT_ID", None)
+            with self.assertRaises(KeyError):
+                check_environment_identity()
 
     def test_studio_generated_publisher_prefix_is_preserved(self):
         schema = "craf4_almreleaseadvisor_Demo"
