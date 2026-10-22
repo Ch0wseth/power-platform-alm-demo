@@ -1,4 +1,4 @@
-"""Validate the managed harness demo payload and its deployment evidence."""
+"""Validate the managed harness demo export and source-test attestation."""
 
 import argparse
 import hashlib
@@ -49,9 +49,9 @@ def check_configuration():
 def check_source_configuration():
     check_configuration()
     if os.environ.get("SOURCE_HARNESS_VERIFIED") != "true":
-        raise ValueError("Confirm the GitHub Copilot Harness in Studio first")
+        raise ValueError("Confirm the harness, source acceptance tests and settings in TEST first")
     if not re.fullmatch(r"ppdemo_[A-Za-z0-9_]+", os.environ.get("HARNESS_AGENT_SCHEMA", "")):
-        raise ValueError("Set HARNESS_AGENT_SCHEMA to the DEV agent's ppdemo_ schema")
+        raise ValueError("Set HARNESS_AGENT_SCHEMA to the TEST agent's ppdemo_ schema")
 
 
 def validate_solution(folder, schema):
@@ -91,12 +91,14 @@ def seal_export(folder):
         "release_run_attempt": positive_id(os.environ["GITHUB_RUN_ATTEMPT"]),
         "source_environment": environment_fingerprint(os.environ["PP_ENVIRONMENT_ID"]),
         "source_harness_attested": True,
+        "source_acceptance_attested": True,
+        "validation_scope": "source-agent-only",
     }
     (folder / "release.json").write_text(json.dumps(evidence, indent=2) + "\n")
     return evidence
 
 
-def verify_payload(folder, run_id, attempt, tested=False, target=None):
+def verify_payload(folder, run_id, attempt, target=None):
     evidence = json.loads((folder / "release.json").read_text())
     if (
         evidence["solution"] != SOLUTION
@@ -104,40 +106,19 @@ def verify_payload(folder, run_id, attempt, tested=False, target=None):
         or evidence["release_run_id"] != positive_id(run_id)
         or evidence["release_run_attempt"] != positive_id(attempt)
         or evidence["source_harness_attested"] is not True
+        or evidence["source_acceptance_attested"] is not True
+        or evidence["validation_scope"] != "source-agent-only"
     ):
         raise ValueError("Release identity or source attestation mismatch")
     digest, version = validate_solution(folder, evidence["agent_schema"])
     if digest != evidence["sha256"] or version != evidence["version"]:
         raise ValueError("Payload differs from the exported release")
-    environments = [evidence["source_environment"]]
-    if tested:
-        receipt = json.loads((folder / "test.json").read_text())
-        if any(
-            receipt[key] != evidence[key]
-            for key in ("sha256", "release_run_id", "release_run_attempt")
-        ):
-            raise ValueError("Test receipt does not match the release")
-        if receipt["test_environment"] in environments:
-            raise ValueError("DEV and TEST must be different environments")
-        environments.append(receipt["test_environment"])
-    if target and environment_fingerprint(target) in environments:
-        raise ValueError("Target must differ from the upstream environments")
+    if target and environment_fingerprint(target) == evidence["source_environment"]:
+        raise ValueError("PROD must differ from the TEST source environment")
     return evidence
 
 
-def record_test(folder, run_id, attempt):
-    target = os.environ["PP_ENVIRONMENT_ID"]
-    evidence = verify_payload(folder, run_id, attempt, target=target)
-    receipt = {
-        key: evidence[key]
-        for key in ("sha256", "release_run_id", "release_run_attempt")
-    }
-    receipt["test_environment"] = environment_fingerprint(target)
-    (folder / "test.json").write_text(json.dumps(receipt, indent=2) + "\n")
-    return evidence
-
-
-def verify_test_run(repo, run_id):
+def verify_export_run(repo, run_id):
     run_id = positive_id(run_id)
     run = json.loads(gh("api", f"repos/{repo}/actions/runs/{run_id}"))
     verify_run(run, repo, WORKFLOW)
@@ -146,10 +127,10 @@ def verify_test_run(repo, run_id):
         gh("api", f"repos/{repo}/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page=100")
     )
     required = {
-        "Verify managed payload for test",
-        "Import managed harness solution",
-        "Record tested payload",
-        "Upload tested release",
+        "Check source configuration and attestation",
+        "Export managed harness solution",
+        "Seal managed payload",
+        "Upload managed export",
     }
     for job in result["jobs"]:
         passed = {
@@ -159,17 +140,16 @@ def verify_test_run(repo, run_id):
         }
         if job["conclusion"] == "success" and required <= passed:
             return attempt
-    raise ValueError("No completed managed harness deployment in the latest attempt")
+    raise ValueError("No completed managed harness export in the latest attempt")
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "operation",
-        choices=("config", "source-config", "seal", "verify", "tested", "provenance"),
+        choices=("config", "source-config", "seal", "verify", "provenance"),
     )
     parser.add_argument("--folder", type=Path, default=Path("release"))
-    parser.add_argument("--tested", action="store_true")
     parser.add_argument("--target", action="store_true")
     args = parser.parse_args()
     if args.operation == "config":
@@ -181,7 +161,7 @@ def main():
     if args.operation == "provenance":
         if os.environ.get("TEST_VALIDATED") != "true":
             raise ValueError("Explicit functional and harness validation is required")
-        attempt = verify_test_run(
+        attempt = verify_export_run(
             os.environ["GITHUB_REPOSITORY"], os.environ["RELEASE_RUN_ID"]
         )
         with open(os.environ["GITHUB_OUTPUT"], "a") as output:
@@ -192,16 +172,12 @@ def main():
     else:
         run_id = os.environ["RELEASE_RUN_ID"]
         attempt = os.environ["RELEASE_RUN_ATTEMPT"]
-        if args.operation == "tested":
-            evidence = record_test(args.folder, run_id, attempt)
-        else:
-            evidence = verify_payload(
-                args.folder,
-                run_id,
-                attempt,
-                tested=args.tested,
-                target=os.environ["PP_ENVIRONMENT_ID"] if args.target else None,
-            )
+        evidence = verify_payload(
+            args.folder,
+            run_id,
+            attempt,
+            target=os.environ["PP_ENVIRONMENT_ID"] if args.target else None,
+        )
     print(f"Managed solution {evidence['solution']} {evidence['version']}")
     print(f"SHA-256: {evidence['sha256']}")
     if os.environ.get("GITHUB_STEP_SUMMARY"):
@@ -209,7 +185,8 @@ def main():
             summary.write(
                 f"Managed solution `{evidence['solution']}` {evidence['version']}\n\n"
                 f"SHA-256: `{evidence['sha256']}`\n\n"
-                "Harness selection and conversational quality require Studio checks. "
+                "TEST source-agent checks are human-attested. The managed ZIP has "
+                "not been imported or tested before PROD in this two-environment demo. "
                 "No explicit publish command is run; inspect publication and channels.\n"
             )
 

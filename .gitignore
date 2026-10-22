@@ -5,3 +5,4 @@ out/
 !.env.example
 deployment/target-environment.json
 __pycache__/
+.venv/

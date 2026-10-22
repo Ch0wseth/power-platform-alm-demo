@@ -4,24 +4,24 @@ on:
   workflow_dispatch:
     inputs:
       release_run_id:
-        description: Successful Export GitHub Harness agent and deploy to test run
+        description: Successful Export validated GitHub Harness agent from test run
         type: string
         required: true
       test_validated:
-        description: I checked the GitHub Copilot Harness, instructions, model, and acceptance cases in TEST for this release
+        description: I approve this export from the validated TEST source; the managed ZIP has not been imported or tested before PROD
         type: boolean
         required: true
         default: false
 
 concurrency:
-  group: harness-promotion
+  group: harness-promotion-${{ github.run_id }}
   cancel-in-progress: false
 
 permissions: {}
 
 jobs:
   validate:
-    name: Validate test evidence and freeze production payload
+    name: Validate source attestation and freeze production payload
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     permissions:
@@ -37,25 +37,25 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Verify successful test deployment and attestation
+      - name: Verify successful export and source-test attestation
         id: provenance
         env:
           GH_TOKEN: ${{ github.token }}
           TEST_VALIDATED: ${{ inputs.test_validated }}
         run: python3 scripts/harness_release.py provenance
 
-      - name: Download the tested release
+      - name: Download the validated source export
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: harness-tested-release-${{ steps.provenance.outputs.attempt }}
+          name: harness-export-${{ steps.provenance.outputs.attempt }}
           path: release
           run-id: ${{ inputs.release_run_id }}
           github-token: ${{ github.token }}
 
-      - name: Verify tested payload
+      - name: Verify exported payload
         env:
           RELEASE_RUN_ATTEMPT: ${{ steps.provenance.outputs.attempt }}
-        run: python3 scripts/harness_release.py verify --tested
+        run: python3 scripts/harness_release.py verify
 
       - name: Freeze approved payload
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -70,7 +70,10 @@ jobs:
     needs: validate
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    environment: copilot-harness-prod
+    concurrency:
+      group: copilot-studio-production
+      cancel-in-progress: false
+    environment: copilot-studio-prod
     permissions:
       contents: read
       id-token: write
@@ -97,7 +100,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/harness_release.py config
-          python3 scripts/harness_release.py verify --tested --target
+          python3 scripts/harness_release.py verify --target
 
       - name: Set up .NET
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -126,7 +129,7 @@ jobs:
           --async --max-async-wait-time 30
 
       - name: Report production payload
-        run: python3 scripts/harness_release.py verify --tested --target
+        run: python3 scripts/harness_release.py verify --target
 
       - name: Remove runner authentication profile
         if: always() && (steps.authenticate.outcome == 'success' || steps.authenticate.outcome == 'failure')
