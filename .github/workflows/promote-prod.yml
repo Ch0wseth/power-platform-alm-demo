@@ -29,9 +29,11 @@ jobs:
     name: Verify test evidence and freeze promotion artifact
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    environment: copilot-studio-test
     permissions:
       contents: read
       actions: read
+      id-token: write
     steps:
       - name: Check out validation script
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -47,13 +49,33 @@ jobs:
           TEST_VALIDATED: ${{ inputs.test_validated }}
         run: python3 scripts/verify_promotion.py
 
-      - name: Download the artifact used in test
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - name: Sign in to Azure using GitHub OIDC
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
-          name: travel-studio-export
-          path: promotion
-          run-id: ${{ inputs.export_run_id }}
-          github-token: ${{ github.token }}
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Download the export used in test
+        env:
+          EXPORT_RUN_ID: ${{ inputs.export_run_id }}
+          STORAGE_ACCOUNT: ${{ vars.EXPORT_STORAGE_ACCOUNT }}
+          STORAGE_CONTAINER: ${{ vars.EXPORT_STORAGE_CONTAINER }}
+        run: |
+          set -euo pipefail
+          mkdir -p promotion
+          names=$(az storage blob list --auth-mode login \
+            --account-name "$STORAGE_ACCOUNT" --container-name "$STORAGE_CONTAINER" \
+            --prefix "exports/$EXPORT_RUN_ID/" --query '[].name' -o tsv --only-show-errors)
+          if [[ -z "$names" ]]; then
+            echo "::error::No private export found for run $EXPORT_RUN_ID"
+            exit 1
+          fi
+          while IFS= read -r name; do
+            az storage blob download --auth-mode login \
+              --account-name "$STORAGE_ACCOUNT" --container-name "$STORAGE_CONTAINER" \
+              --name "$name" --file "promotion/${name##*/}" --only-show-errors
+          done <<< "$names"
 
       - name: Freeze payload hashes and test evidence
         env:
@@ -89,13 +111,18 @@ jobs:
               summary.write("Functional testing is attested by the dispatcher, not automated by this workflow.\n")
           PY
 
-      - name: Store the exact production payload
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: validated-promotion
-          path: promotion/*
-          if-no-files-found: error
-          retention-days: 3
+      - name: Store the exact production payload privately
+        env:
+          STORAGE_ACCOUNT: ${{ vars.EXPORT_STORAGE_ACCOUNT }}
+          STORAGE_CONTAINER: ${{ vars.EXPORT_STORAGE_CONTAINER }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          for file in promotion/*; do
+            az storage blob upload --auth-mode login \
+              --account-name "$STORAGE_ACCOUNT" --container-name "$STORAGE_CONTAINER" \
+              --name "promotions/$RUN_ID/$(basename "$file")" --file "$file" --overwrite false --only-show-errors
+          done
 
   production:
     name: Deploy approved payload to production
@@ -115,11 +142,33 @@ jobs:
       PP_ENVIRONMENT_ID: ${{ secrets.PP_ENVIRONMENT_ID }}
       PP_ENVIRONMENT_URL: ${{ secrets.PP_ENVIRONMENT_URL }}
     steps:
-      - name: Download approved payload
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - name: Sign in to Azure using production read-only OIDC identity
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
-          name: validated-promotion
-          path: promotion
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Download approved payload
+        env:
+          STORAGE_ACCOUNT: ${{ vars.EXPORT_STORAGE_ACCOUNT }}
+          STORAGE_CONTAINER: ${{ vars.EXPORT_STORAGE_CONTAINER }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p promotion
+          names=$(az storage blob list --auth-mode login \
+            --account-name "$STORAGE_ACCOUNT" --container-name "$STORAGE_CONTAINER" \
+            --prefix "promotions/$RUN_ID/" --query '[].name' -o tsv --only-show-errors)
+          if [[ -z "$names" ]]; then
+            echo "::error::No validated payload found for this run"
+            exit 1
+          fi
+          while IFS= read -r name; do
+            az storage blob download --auth-mode login \
+              --account-name "$STORAGE_ACCOUNT" --container-name "$STORAGE_CONTAINER" \
+              --name "$name" --file "promotion/${name##*/}" --only-show-errors
+          done <<< "$names"
 
       - name: Verify payload and production configuration
         env:

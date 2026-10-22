@@ -104,7 +104,9 @@ These paths start with the **live agent in Dataverse**, unlike `package-agent.ym
 | Classic solution | `pac solution export` produces the unmanaged solution ZIP | `pac solution import` imports the solution and its included components |
 | Agent template YAML | `pac copilot extract-template` produces one agent template | `pac copilot create --templateFileName ...` creates a separate agent |
 
-Run **Export Travel Concierge from Studio** (`export-agent.yml`) on `main`, selecting `both`. It exports solution `ppdemo_ReleaseRadar` and extracts that agent's template. The files are available in the `travel-studio-export` artifact for three days. Live exports can contain environment content: review before sharing or committing them. This public workshop repository must contain synthetic demo content only.
+Run **Export Travel Concierge from Studio** (`export-agent.yml`) on `main`, selecting `both`. It exports solution `ppdemo_ReleaseRadar` and extracts that agent's template. The files are stored in private Azure Blob Storage under `exports/<run-id>/` (not as public run artifacts). Live exports can contain environment content: review before sharing or committing them. This public workshop repository must contain synthetic demo content only.
+
+One-time setup: the `copilot-studio-test` and `copilot-studio-prod` Environments need the variables `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `EXPORT_STORAGE_ACCOUNT` and `EXPORT_STORAGE_CONTAINER`. Test uses an Entra application with **Storage Blob Data Contributor** on the container; production uses a separate one with **Storage Blob Data Reader**. Each federated credential trusts only this repository's matching environment subject. The storage account must have Shared Key access disabled and no anonymous container access.
 
 Then run **Deploy Studio export (ZIP or YAML)** (`deploy-export.yml`):
 
@@ -132,15 +134,17 @@ Run **Promote validated Studio export to production** (`promote-prod.yml`) on
 2. Select the same format that deployed successfully in that test run.
 3. Check `test_validated` to attest that functional testing passed.
 4. The validation job checks workflow provenance, the successful format-specific
-   PAC step and the test run's artifact-download reference. It then freezes the
-   exported files and their SHA-256 in a promotion artifact; nothing is rebuilt.
+   PAC step and the test run's export download reference. It then freezes the
+   exported files and their SHA-256 in a private promotion payload in Blob
+   Storage (`promotions/<run-id>/`); nothing is rebuilt.
 5. Approve the **copilot-studio-prod** deployment in GitHub's **Review deployments**
    dialog. Only then does the production job receive its OIDC credentials and
    deploy the payload whose hash was verified.
 
 Manual dispatch and a required GitHub Environment review are two separate gates.
 Functional testing is a human attestation, not an automated conversation test.
-The evidence check currently reads the pinned download action's `run-id` log line;
+The evidence check currently reads the `Export run: <id>` line printed by the
+test deployment's `Download trusted export` step;
 if logs are expired or that format changes, it fails closed. Rerun test deployment
 to supply new evidence instead of skipping validation.
 
