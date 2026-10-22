@@ -60,17 +60,37 @@ Create in Studio TEST (once, manual GitHub Copilot Harness selection)
    `ppdemo_HarnessReleaseAdvisor` and a custom publisher with prefix `ppdemo`.
    Add the new agent and its required objects. Use the solution explorer available
    in your tenant; review dependencies before exporting.
-6. Find the agent's actual schema name in the solution. It must use the `ppdemo_`
-   prefix; record it as the TEST GitHub Environment variable
+6. Find the agent's actual schema name in Studio's agent settings; record it as
+   the TEST GitHub Environment variable
    `HARNESS_AGENT_SCHEMA`. Do not use its display name, GUID, or the schema of
-   Travel Concierge. If your agent was created with another publisher prefix,
-   recreate this demo in the intended publisher context rather than editing ZIPs.
+   Travel Concierge. Studio can assign its default publisher prefix when creating
+   the agent. Preserve this immutable schema; the containing solution uses
+   `ppdemo`, but its existing agent can legitimately have a different prefix.
+   Do not recreate the agent or rename entries in exported ZIPs to force a match.
 7. Run the acceptance cases below in TEST. Save changes using Studio and check that
    the solution contains the current instructions before exporting.
 
 Microsoft documents harness selection at creation time and no transfer between
 standard and GitHub Copilot harnesses. This repository does not invent a
 `harness: github` YAML setting or a PAC CLI conversion command.
+
+If the dedicated unmanaged solution already exists, PAC can add the saved agent
+and its required components without opening the Power Apps signup experience.
+Replace the placeholder with the agent's ID from `pac copilot list`, not its name:
+
+```powershell
+dnx Microsoft.PowerApps.CLI.Tool@2.13.1 --yes solution add-solution-component `
+  --environment <test-environment-id> `
+  --solutionUniqueName ppdemo_HarnessReleaseAdvisor `
+  --component <agent-id> `
+  --componentType bot `
+  --AddRequiredComponents
+```
+
+Use the logical type `bot` so PAC resolves the environment's component type.
+The solution must already exist and have the intended publisher and version.
+This adds the agent to a deployment container; it does not change the agent's
+original publisher or publish it to a channel.
 
 ## Configure the GitHub environments
 
